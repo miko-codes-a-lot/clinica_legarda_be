@@ -5,6 +5,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ConfigModule } from '@nestjs/config';
+import { ClinicsModule } from './clinics/clinics.module';
 import configuration from './_shared/configuration';
 
 @Module({
@@ -15,10 +16,12 @@ import configuration from './_shared/configuration';
     MongooseModule.forRootAsync({
       useFactory: () => ({
         uri: configuration().db.uri,
+        dbName: configuration().db.name,
       }),
     }),
     AuthModule,
     UsersModule,
+    ClinicsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
