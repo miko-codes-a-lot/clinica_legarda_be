@@ -1,26 +1,28 @@
-import { Injectable } from '@nestjs/common';
-import { CreateClinicDto } from './dto/create-clinic.dto';
-import { UpdateClinicDto } from './dto/update-clinic.dto';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Clinic } from './entities/clinic.entity';
+import mongoose, { Model } from 'mongoose';
+import { ClinicUpsertDto } from './dto/clinic-upsert.dto';
 
 @Injectable()
 export class ClinicsService {
-  create(createClinicDto: CreateClinicDto) {
-    return 'This action adds a new clinic';
+  constructor(@InjectModel(Clinic.name) private readonly clinicModel: Model<Clinic>) {}
+
+  findOne(id: string) {
+    return this.clinicModel.findOne({ _id: id })
   }
 
-  findAll() {
-    return `This action returns all clinics`;
-  }
+  async upsert(doc: ClinicUpsertDto, id?: string) {
+    const dup = await this.clinicModel.findOne({ name: doc.name })
 
-  findOne(id: number) {
-    return `This action returns a #${id} clinic`;
-  }
+    if (dup) throw new BadRequestException(`Clinic name is already taken: "${doc.name}"`)
 
-  update(id: number, updateClinicDto: UpdateClinicDto) {
-    return `This action updates a #${id} clinic`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} clinic`;
+    return this.clinicModel.findOneAndUpdate(
+      { _id: id || new mongoose.Types.ObjectId() },
+      {
+        $set: doc,
+      },
+      { upsert: true, new: true },
+    );
   }
 }

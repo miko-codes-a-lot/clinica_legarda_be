@@ -8,11 +8,21 @@ export type ClinicDocument = HydratedDocument<Clinic>;
   collection: 'clinics',
 })
 export class Clinic {
+  @Prop()
   name: string
+
+  @Prop()
   address: string
+
+  @Prop()
   mobileNumber: string
+
+  @Prop()
   emailAddress: string
+
+  @Prop()
   operatingHours: OperatingHour[]
+
   // dentists: User[]
 }
 
