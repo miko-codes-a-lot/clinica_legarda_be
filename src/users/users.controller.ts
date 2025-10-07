@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from 'src/_shared/decorators/user.decorator';
@@ -37,5 +38,11 @@ export class UsersController {
   @Post()
   create(@Body() doc: UserUpsertDto) {
     return this.usersService.upsert(doc);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Put(':id')
+  update(@Param('id') id: string, doc: UserUpsertDto) {
+    return this.usersService.upsert(doc, id);
   }
 }

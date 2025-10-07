@@ -4,4 +4,4 @@ export default () => ({
     uri: process.env.DATABASE_URI,
     name: process.env.DATABASE_NAME,
   },
-})
+});

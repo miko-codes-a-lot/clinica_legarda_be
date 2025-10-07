@@ -6,16 +6,25 @@ import { ClinicUpsertDto } from './dto/clinic-upsert.dto';
 
 @Injectable()
 export class ClinicsService {
-  constructor(@InjectModel(Clinic.name) private readonly clinicModel: Model<Clinic>) {}
+  constructor(
+    @InjectModel(Clinic.name) private readonly clinicModel: Model<Clinic>,
+  ) {}
 
-  findOne(id: string) {
-    return this.clinicModel.findOne({ _id: id })
+  async findAll() {
+    return this.clinicModel.find();
+  }
+
+  async findOne(id: string) {
+    return this.clinicModel.findOne({ _id: id }).populate('dentists');
   }
 
   async upsert(doc: ClinicUpsertDto, id?: string) {
-    const dup = await this.clinicModel.findOne({ name: doc.name })
+    const dup = await this.clinicModel.findOne({ name: doc.name });
 
-    if (dup) throw new BadRequestException(`Clinic name is already taken: "${doc.name}"`)
+    if (dup)
+      throw new BadRequestException(
+        `Clinic name is already taken: "${doc.name}"`,
+      );
 
     return this.clinicModel.findOneAndUpdate(
       { _id: id || new mongoose.Types.ObjectId() },
