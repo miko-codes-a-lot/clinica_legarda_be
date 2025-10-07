@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { User } from './entities/user.entity';
 import mongoose, { Model } from 'mongoose';
 import { UserUpsertDto } from './dto/user-upsert.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -24,6 +25,10 @@ export class UsersService {
 
   async upsert(doc: UserUpsertDto, id?: string) {
     const dup = await this.userModel.findOne({ username: doc.username });
+
+    if (doc.password) {
+      doc.password = await bcrypt.hash(doc.password, 10);
+    }
 
     if (dup)
       throw new BadRequestException(
