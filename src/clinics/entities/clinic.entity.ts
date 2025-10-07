@@ -7,18 +7,19 @@ export type ClinicDocument = HydratedDocument<Clinic>;
 
 @Schema({
   collection: 'clinics',
+  timestamps: true,
 })
 export class Clinic {
   @Prop()
   name: string;
 
-  @Prop()
+  @Prop({ trim: true })
   address: string;
 
-  @Prop()
+  @Prop({ trim: true })
   mobileNumber: string;
 
-  @Prop()
+  @Prop({ trim: true })
   emailAddress: string;
 
   @Prop()

@@ -24,11 +24,14 @@ export class UsersService {
   }
 
   async upsert(doc: UserUpsertDto, id?: string) {
-    const dup = await this.userModel.findOne({ username: doc.username });
-
     if (doc.password) {
       doc.password = await bcrypt.hash(doc.password, 10);
     }
+
+    const dup = await this.userModel.findOne({
+      ...(id && { _id: { $ne: id } }),
+      username: doc.username,
+    });
 
     if (dup)
       throw new BadRequestException(
