@@ -12,7 +12,7 @@ export class UsersService {
   ) {}
 
   findByOneUsername(username: string) {
-    return this.userModel.findOne({ username });
+    return this.userModel.findOne({ username }).select('+password');
   }
 
   findAll() {

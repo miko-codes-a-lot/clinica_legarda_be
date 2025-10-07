@@ -18,6 +18,6 @@ export class AuthController {
 
     res.cookie('jwt', accessToken, { httpOnly: true, sameSite: 'none' });
 
-    return res.status(200).send({ user });
+    return res.status(200).send(user);
   }
 }

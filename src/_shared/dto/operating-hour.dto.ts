@@ -1,12 +1,12 @@
-import { IsNotEmpty } from 'class-validator'
+import { IsNotEmpty } from 'class-validator';
 
 export class OperatingHourDto {
   @IsNotEmpty()
-  day: string
-  
-  @IsNotEmpty()
-  startTime: string
+  day: string;
 
   @IsNotEmpty()
-  endTime: string
+  startTime: string;
+
+  @IsNotEmpty()
+  endTime: string;
 }

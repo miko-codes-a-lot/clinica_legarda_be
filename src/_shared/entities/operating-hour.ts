@@ -1,13 +1,13 @@
-import { Prop, Schema } from '@nestjs/mongoose'
+import { Prop, Schema } from '@nestjs/mongoose';
 
 @Schema({ _id: false })
 export class OperatingHour {
   @Prop()
-  day: string
+  day: string;
 
   @Prop()
-  startTime: string
+  startTime: string;
 
   @Prop()
-  endTime: string
+  endTime: string;
 }
