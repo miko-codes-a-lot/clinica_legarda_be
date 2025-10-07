@@ -7,6 +7,7 @@ import { UsersModule } from './users/users.module';
 import { ConfigModule } from '@nestjs/config';
 import { ClinicsModule } from './clinics/clinics.module';
 import { DentalCatalogModule } from './dental-catalog/dental-catalog.module';
+import { AppointmentsModule } from './appointments/appointments.module';
 import configuration from './_shared/configuration';
 
 @Module({
@@ -24,6 +25,7 @@ import configuration from './_shared/configuration';
     UsersModule,
     ClinicsModule,
     DentalCatalogModule,
+    AppointmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

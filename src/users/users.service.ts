@@ -46,8 +46,4 @@ export class UsersService {
       { upsert: true, new: true },
     );
   }
-
-  remove(id: string) {
-    return `This action removes a #${id} user`;
-  }
 }

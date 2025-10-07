@@ -38,9 +38,9 @@ export class UserUpsertDto {
   @IsNotEmpty()
   address: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsMongoId()
-  clinic: string;
+  clinic?: string;
 
   @IsOptional()
   @IsArray()
