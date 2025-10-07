@@ -6,14 +6,16 @@ import { UserUpsertDto } from './dto/user-upsert.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private readonly userModel: Model<User>) {}
+  constructor(
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+  ) {}
 
   findByOneUsername(username: string) {
     return this.userModel.findOne({ username });
   }
 
   findAll() {
-    return `This action returns all users`;
+    return this.userModel.find();
   }
 
   findOne(id: string) {
@@ -21,9 +23,12 @@ export class UsersService {
   }
 
   async upsert(doc: UserUpsertDto, id?: string) {
-    const dup = await this.userModel.findOne({ username: doc.username })
+    const dup = await this.userModel.findOne({ username: doc.username });
 
-    if (dup) throw new BadRequestException(`Username is already taken: "${doc.username}"`)
+    if (dup)
+      throw new BadRequestException(
+        `Username is already taken: "${doc.username}"`,
+      );
 
     return this.userModel.findOneAndUpdate(
       { _id: id || new mongoose.Types.ObjectId() },

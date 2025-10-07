@@ -1,7 +1,7 @@
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { HydratedDocument } from "mongoose";
-import { OperatingHour } from "src/_shared/entities/operating-hour";
-import { Clinic } from "src/clinics/entities/clinic.entity";
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument } from 'mongoose';
+import { OperatingHour } from 'src/_shared/entities/operating-hour';
+import { Clinic } from 'src/clinics/entities/clinic.entity';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -10,39 +10,39 @@ export type UserDocument = HydratedDocument<User>;
 })
 export class User {
   @Prop()
-  firstName: string
+  firstName: string;
 
   @Prop()
-  middleName?: string
+  middleName?: string;
 
   @Prop()
-  lastName: string
+  lastName: string;
 
   @Prop()
-  emailAddress: string
+  emailAddress: string;
 
   @Prop()
-  mobileNumber: string
+  mobileNumber: string;
 
   @Prop()
-  address: string
-  
+  address: string;
+
   @Prop()
-  username: string
+  username: string;
 
   @Prop({ select: false })
-  password?: string
+  password?: string;
 
   @Prop({ ref: () => Clinic.name })
-  clinic?: Clinic
+  clinic?: Clinic;
 
   @Prop()
-  operatingHours?: OperatingHour[]
+  operatingHours?: OperatingHour[];
 
   // appointments: Appointment[]
 
   @Prop()
-  role: string
+  role: string;
 }
 
-export const UserSchema = SchemaFactory.createForClass(User)
+export const UserSchema = SchemaFactory.createForClass(User);
