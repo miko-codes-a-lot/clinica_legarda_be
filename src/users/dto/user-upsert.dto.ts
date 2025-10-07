@@ -1,45 +1,53 @@
-import { Type } from "class-transformer";
-import { IsArray, IsEmail, IsMongoId, IsNotEmpty, IsOptional, IsString, ValidateNested } from "class-validator";
-import { OperatingHourDto } from "src/_shared/dto/operating-hour.dto";
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsEmail,
+  IsMongoId,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
+import { OperatingHourDto } from 'src/_shared/dto/operating-hour.dto';
 
 export class UserUpsertDto {
   @IsNotEmpty()
-  firstName: string
+  firstName: string;
 
   @IsOptional()
   @IsString()
-  middleName?: string
+  middleName?: string;
 
   @IsNotEmpty()
-  lastName: string
+  lastName: string;
 
   @IsNotEmpty()
-  username: string
+  username: string;
 
   @IsOptional()
   @IsNotEmpty()
-  password?: string
+  password?: string;
 
   @IsNotEmpty()
   @IsEmail()
-  emailAddress: string
+  emailAddress: string;
 
   @IsNotEmpty()
-  mobileNumber: string
+  mobileNumber: string;
 
   @IsNotEmpty()
-  address: string
+  address: string;
 
   @IsNotEmpty()
   @IsMongoId()
-  clinic: string
+  clinic: string;
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OperatingHourDto)
-  operatingHours?: OperatingHourDto[]
+  operatingHours?: OperatingHourDto[];
 
   @IsString()
-  role: string
+  role: string;
 }

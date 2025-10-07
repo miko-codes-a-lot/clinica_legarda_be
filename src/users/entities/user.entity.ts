@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import mongoose, { HydratedDocument } from 'mongoose';
 import { OperatingHour } from 'src/_shared/entities/operating-hour';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
 
@@ -33,7 +33,7 @@ export class User {
   @Prop({ select: false })
   password?: string;
 
-  @Prop({ ref: () => Clinic.name })
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: () => Clinic.name })
   clinic?: Clinic;
 
   @Prop()
