@@ -9,7 +9,6 @@ export class NotificationsController {
 
   @Get()
   findAll(@User() user: UserDto) {
-    console.log(user, 'userdto');
     return this.notificationsService.findAllForUser(user.sub);
   }
 

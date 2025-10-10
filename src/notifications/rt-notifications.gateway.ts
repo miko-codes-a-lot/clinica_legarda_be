@@ -60,7 +60,6 @@ export class RtNotificationsGateway
 
   @OnEvent('notification.created')
   handleNotificationCreated(notification: Notification) {
-    console.log('test lol');
     this.sendNotificationToUser(
       notification.recipient._id.toString(),
       notification,
