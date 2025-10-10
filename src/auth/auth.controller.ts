@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
+import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/sign-in.dto';
 import { Response } from 'express';
@@ -22,6 +22,17 @@ export class AuthController {
       sameSite: 'none',
     });
 
-    return res.status(200).send(user);
+    return res.status(200).send({ user });
+  }
+
+  @Post('sign-out')
+  signOut(@Res() res: Response) {
+    res.clearCookie('jwt', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+    });
+
+    return res.status(HttpStatus.NO_CONTENT).send();
   }
 }

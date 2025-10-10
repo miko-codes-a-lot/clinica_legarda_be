@@ -12,7 +12,10 @@ export class UsersService {
   ) {}
 
   findByOneUsername(username: string) {
-    return this.userModel.findOne({ username }).select('+password');
+    return this.userModel
+      .findOne({ username })
+      .select('+password')
+      .populate('clinic');
   }
 
   findAll(role?: string) {

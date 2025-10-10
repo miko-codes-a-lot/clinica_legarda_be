@@ -25,7 +25,7 @@ export class UsersController {
 
   @Get('profile')
   profile(@User() user: UserDto) {
-    return user;
+    return this.usersService.findByOneUsername(user.username);
   }
 
   @HttpCode(HttpStatus.OK)
