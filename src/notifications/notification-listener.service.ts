@@ -125,17 +125,25 @@ export class NotificationListenerService implements OnModuleInit {
     const patientName = `${appointment.patient.firstName} ${appointment.patient.lastName}`;
     const dentistName = `${appointment.dentist.firstName} ${appointment.dentist.lastName}`;
 
+    const notificationsToCreate: CreateNotificationDto[] = [];
+
     let patientMessage: string | null = null;
     let dentistMessage: string | null = null;
+
+    // Not important to notify the admin that the appointment status has changed
+    // the admin is only interested in the creation
+    // let adminMessage: string | null = null;
 
     switch (appointment.status) {
       case AppointmentStatus.CONFIRMED:
         patientMessage = `Your appointment with Dr. ${dentistName} has been confirmed.`;
         dentistMessage = `You have confirmed the appointment for ${patientName}.`;
+        // adminMessage = `Dr. ${dentistName} confirmed the appointment for ${patientName}.`;
         break;
       case AppointmentStatus.CANCELLED:
         patientMessage = `Your appointment with Dr. ${dentistName} has been cancelled.`;
         dentistMessage = `The appointment for ${patientName} has been cancelled.`;
+        // adminMessage = `The appointment for ${patientName} with Dr. ${dentistName} has been cancelled.`;
         break;
       case AppointmentStatus.COMPLETED:
         patientMessage = `Your appointment with Dr. ${dentistName} is complete. Thank you!`;
@@ -143,7 +151,7 @@ export class NotificationListenerService implements OnModuleInit {
     }
 
     if (patientMessage) {
-      await this.notificationService.create({
+      notificationsToCreate.push({
         recipient: appointment.patient._id.toString(),
         message: patientMessage,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
@@ -152,12 +160,31 @@ export class NotificationListenerService implements OnModuleInit {
     }
 
     if (dentistMessage) {
-      await this.notificationService.create({
+      notificationsToCreate.push({
         recipient: appointment.dentist._id.toString(),
         message: dentistMessage,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
         link: `/admin/appointment/details/${appointment._id.toString()}`,
       });
+    }
+
+    // if (adminMessage) {
+    //   const admins = await this.userService.findAll('admin');
+    //   admins.forEach((admin) => {
+    //     notificationsToCreate.push({
+    //       recipient: admin._id.toString(),
+    //       message: adminMessage,
+    //       type: NotificationType.APPOINTMENT_STATUS_UPDATED,
+    //       link: `/admin/appointment/details/${appointment._id.toString()}`,
+    //     });
+    //   });
+    // }
+
+    if (notificationsToCreate.length > 0) {
+      await this.notificationService.createMany(notificationsToCreate);
+      this.logger.log(
+        `Successfully created ${notificationsToCreate.length} notifications for status update.`,
+      );
     }
   }
 }
