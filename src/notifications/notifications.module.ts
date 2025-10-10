@@ -12,6 +12,8 @@ import {
   AppointmentSchema,
 } from 'src/appointments/entities/appointment.entity';
 import { UsersModule } from 'src/users/users.module';
+import { RtNotificationsGateway } from './rt-notifications.gateway';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
@@ -20,8 +22,14 @@ import { UsersModule } from 'src/users/users.module';
       { name: Appointment.name, schema: AppointmentSchema },
     ]),
     UsersModule,
+    AuthModule,
   ],
   controllers: [NotificationsController],
-  providers: [NotificationsService, NotificationListenerService],
+  providers: [
+    NotificationsService,
+    NotificationListenerService,
+    RtNotificationsGateway,
+  ],
+  exports: [NotificationsService],
 })
 export class NotificationsModule {}

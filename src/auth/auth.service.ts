@@ -10,6 +10,12 @@ export class AuthService {
     private readonly userService: UsersService,
   ) {}
 
+  verifyJwt(token: string) {
+    return this.jwtService.verifyAsync(token, {
+      secret: 'secret',
+    });
+  }
+
   async signIn(username: string, password: string) {
     const user = await this.userService.findByOneUsername(username);
     if (!user)
@@ -23,7 +29,7 @@ export class AuthService {
     user.password = undefined;
 
     const payload = {
-      sub: 'userId',
+      sub: user._id.toString(),
       username,
       role: user.role,
       ...(user.clinic && { clinic: user.clinic }),

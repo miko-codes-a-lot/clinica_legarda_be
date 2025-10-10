@@ -3,17 +3,23 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Notification } from './entities/notification.entity';
 import { CreateNotificationDto } from './dto/create-notification.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<Notification>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  create(createNotificationDto: CreateNotificationDto) {
+  async create(createNotificationDto: CreateNotificationDto) {
     const newNotification = new this.notificationModel(createNotificationDto);
-    return newNotification.save();
+    await newNotification.save();
+
+    this.eventEmitter.emit('notification.created', newNotification);
+
+    return newNotification;
   }
 
   async findAllForUser(userId: string) {
@@ -33,7 +39,13 @@ export class NotificationsService {
     );
   }
 
-  createMany(createNotificationDtos: CreateNotificationDto[]) {
-    return this.notificationModel.insertMany(createNotificationDtos);
+  async createMany(createNotificationDtos: CreateNotificationDto[]) {
+    const createdNotifications = await this.notificationModel.insertMany(
+      createNotificationDtos,
+    );
+
+    this.eventEmitter.emit('notifications.created', createdNotifications);
+
+    return createdNotifications;
   }
 }

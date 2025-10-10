@@ -10,6 +10,7 @@ import { DentalCatalogModule } from './dental-catalog/dental-catalog.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import configuration from './_shared/configuration';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
@@ -22,13 +23,13 @@ import configuration from './_shared/configuration';
         dbName: configuration().db.name,
       }),
     }),
+    EventEmitterModule.forRoot(),
     AuthModule,
     UsersModule,
     ClinicsModule,
     DentalCatalogModule,
     AppointmentsModule,
     NotificationsModule,
-    RtNotifModule,
   ],
   controllers: [AppController],
   providers: [AppService],
