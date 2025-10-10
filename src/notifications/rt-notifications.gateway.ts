@@ -12,11 +12,6 @@ import { AuthService } from 'src/auth/auth.service';
 import * as cookie from 'cookie';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-    // origin: 'http://localhost:4200',
-    // credentials: true,
-  },
   namespace: 'notifications',
 })
 export class RtNotificationsGateway
@@ -29,7 +24,7 @@ export class RtNotificationsGateway
 
   constructor(private readonly authService: AuthService) {}
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     try {
       const cookies = cookie.parse(client.handshake.headers.cookie || '');
       const token = cookies.jwt;
@@ -37,7 +32,7 @@ export class RtNotificationsGateway
         throw new Error('Authentication token not found in cookie.');
       }
 
-      const payload = this.authService.verifyJwt(token) as unknown as {
+      const payload = (await this.authService.verifyJwt(token)) as unknown as {
         sub: string;
       };
       const userId = payload.sub;
@@ -65,6 +60,7 @@ export class RtNotificationsGateway
 
   @OnEvent('notification.created')
   handleNotificationCreated(notification: Notification) {
+    console.log('test lol');
     this.sendNotificationToUser(
       notification.recipient._id.toString(),
       notification,
