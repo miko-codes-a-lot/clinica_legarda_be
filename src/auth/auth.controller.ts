@@ -16,7 +16,11 @@ export class AuthController {
       credentials.password,
     );
 
-    res.cookie('jwt', accessToken, { httpOnly: true, sameSite: 'none' });
+    res.cookie('jwt', accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+    });
 
     return res.status(200).send(user);
   }
