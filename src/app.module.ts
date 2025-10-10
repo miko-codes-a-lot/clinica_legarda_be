@@ -8,6 +8,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ClinicsModule } from './clinics/clinics.module';
 import { DentalCatalogModule } from './dental-catalog/dental-catalog.module';
 import { AppointmentsModule } from './appointments/appointments.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import configuration from './_shared/configuration';
 
 @Module({
@@ -26,6 +27,8 @@ import configuration from './_shared/configuration';
     ClinicsModule,
     DentalCatalogModule,
     AppointmentsModule,
+    NotificationsModule,
+    RtNotifModule,
   ],
   controllers: [AppController],
   providers: [AppService],

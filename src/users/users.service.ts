@@ -15,8 +15,10 @@ export class UsersService {
     return this.userModel.findOne({ username }).select('+password');
   }
 
-  findAll() {
-    return this.userModel.find();
+  findAll(role?: string) {
+    return this.userModel.find({
+      ...(role && { role }),
+    });
   }
 
   findOne(id: string) {

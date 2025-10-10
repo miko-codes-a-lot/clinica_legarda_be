@@ -10,6 +10,8 @@ export type UserDocument = HydratedDocument<User>;
   timestamps: true,
 })
 export class User {
+  _id: mongoose.Types.ObjectId;
+
   @Prop()
   firstName: string;
 
