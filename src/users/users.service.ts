@@ -25,12 +25,15 @@ export class UsersService {
   }
 
   findOne(id: string) {
+    console.log('test ito: ', id);
     return this.userModel.findOne({ _id: id });
   }
 
   async upsert(doc: UserUpsertDto, id?: string) {
     if (doc.password) {
       doc.password = await bcrypt.hash(doc.password, 10);
+    } else {
+      delete doc.password; // remove password if it's empty to avoid overwriting
     }
 
     const dup = await this.userModel.findOne({
@@ -42,7 +45,8 @@ export class UsersService {
       throw new BadRequestException(
         `Username is already taken: "${doc.username}"`,
       );
-
+    
+    console.log('doc', doc);
     return this.userModel.findOneAndUpdate(
       { _id: id || new mongoose.Types.ObjectId() },
       {

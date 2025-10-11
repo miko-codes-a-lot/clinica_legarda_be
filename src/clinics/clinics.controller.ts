@@ -24,6 +24,7 @@ export class ClinicsController {
   @HttpCode(HttpStatus.OK)
   @Get(':id')
   findOne(@Param('id') id: string) {
+    console.log('clinic id dapat: ', id);
     return this.clinicsService.findOne(id);
   }
 
@@ -35,7 +36,7 @@ export class ClinicsController {
 
   @HttpCode(HttpStatus.OK)
   @Put(':id')
-  update(@Param('id') id: string, doc: ClinicUpsertDto) {
+  update(@Param('id') id: string, @Body() doc: ClinicUpsertDto) {
     return this.clinicsService.upsert(doc, id);
   }
 }

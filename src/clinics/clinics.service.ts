@@ -19,7 +19,10 @@ export class ClinicsService {
   }
 
   async upsert(doc: ClinicUpsertDto, id?: string) {
-    const dup = await this.clinicModel.findOne({ name: doc.name });
+    const dup = await this.clinicModel.findOne({
+      name: doc.name,
+      ...(id && { _id: { $ne: id } }), // exclude the current doc if updating
+    });
 
     if (dup)
       throw new BadRequestException(

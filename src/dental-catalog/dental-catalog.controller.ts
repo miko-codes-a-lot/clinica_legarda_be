@@ -20,7 +20,7 @@ export class DentalCatalogController {
   create(@Body() doc: DentalCatalogUpsertDto) {
     return this.dentalCatalogService.upsert(doc);
   }
-
+  
   @HttpCode(HttpStatus.OK)
   @Get()
   findAll() {
