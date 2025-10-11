@@ -25,8 +25,21 @@ export class UsersService {
   }
 
   findOne(id: string) {
-    console.log('test ito: ', id);
     return this.userModel.findOne({ _id: id });
+  }
+
+  async updateProfilePicture(id: string, fileName: string) {
+    const updatedUser = await this.userModel.findByIdAndUpdate(
+      id,
+      { profilePicture: fileName },
+      { new: true, runValidators: true },
+    );
+
+    if (!updatedUser) {
+      throw new BadRequestException(`User with ID "${id}" not found.`);
+    }
+
+    return updatedUser;
   }
 
   async upsert(doc: UserUpsertDto, id?: string) {

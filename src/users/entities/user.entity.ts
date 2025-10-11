@@ -13,6 +13,9 @@ export class User {
   _id: mongoose.Types.ObjectId;
 
   @Prop()
+  profilePicture: string; // image name
+
+  @Prop()
   firstName: string;
 
   @Prop()
