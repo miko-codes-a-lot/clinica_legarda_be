@@ -42,7 +42,7 @@ export class UsersController {
 
   @HttpCode(HttpStatus.OK)
   @Put(':id')
-  update(@Param('id') id: string, doc: UserUpsertDto) {
+  update(@Param('id') id: string, @Body() doc: UserUpsertDto) {
     return this.usersService.upsert(doc, id);
   }
 }
