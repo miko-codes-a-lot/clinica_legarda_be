@@ -11,6 +11,7 @@ import { AppointmentsModule } from './appointments/appointments.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import configuration from './_shared/configuration';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     DentalCatalogModule,
     AppointmentsModule,
     NotificationsModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

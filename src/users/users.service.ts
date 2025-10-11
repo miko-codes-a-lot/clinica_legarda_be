@@ -45,7 +45,6 @@ export class UsersService {
       throw new BadRequestException(
         `Username is already taken: "${doc.username}"`,
       );
-    
     console.log('doc', doc);
     return this.userModel.findOneAndUpdate(
       { _id: id || new mongoose.Types.ObjectId() },
