@@ -21,9 +21,11 @@ export class AppointmentsService {
     return this.findOne(created._id.toString());
   }
 
-  findAll() {
+  findAll(patient?: string) {
+    const filter = patient ? { patient } : {};
+
     return this.appointmentModel
-      .find()
+      .find(filter)
       .populate('clinic patient dentist services')
       .exec();
   }

@@ -21,6 +21,7 @@ import { extname, join } from 'path';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { existsSync, statSync } from 'fs';
+import { Public } from 'src/auth/auth.guard';
 
 const profilePictureStorage = diskStorage({
   destination: './uploads/profile-pictures',
@@ -144,5 +145,12 @@ export class UsersController {
   @Put(':id')
   update(@Param('id') id: string, @Body() doc: UserUpsertDto) {
     return this.usersService.upsert(doc, id);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.CREATED)
+  @Post('register')
+  async register(@Body() doc: UserUpsertDto) {
+    return this.usersService.upsert(doc);
   }
 }
