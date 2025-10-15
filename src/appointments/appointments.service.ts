@@ -30,6 +30,14 @@ export class AppointmentsService {
       .exec();
   }
 
+  findAllByDentist(dentist?: string) {
+    const filter = dentist ? { dentist } : {};
+    return this.appointmentModel
+      .find(filter)
+      .populate('clinic patient dentist services')
+      .exec();
+  }
+
   async findOne(id: string) {
     const appointment = await this.appointmentModel
       .findById(id)
