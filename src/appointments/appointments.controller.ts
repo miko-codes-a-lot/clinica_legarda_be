@@ -8,7 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   Patch,
-  Query
+  Query,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
@@ -22,12 +22,6 @@ export class AppointmentsController {
   create(@Body() createAppointmentDto: AppointmentUpsertDto) {
     return this.appointmentsService.create(createAppointmentDto);
   }
-
-  // @Get()
-  // @HttpCode(HttpStatus.OK)
-  // findAll() {
-  //   return this.appointmentsService.findAll();
-  // }
 
   @Get()
   @HttpCode(HttpStatus.OK)
