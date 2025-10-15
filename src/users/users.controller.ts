@@ -151,6 +151,7 @@ export class UsersController {
   @HttpCode(HttpStatus.CREATED)
   @Post('register')
   async register(@Body() doc: UserUpsertDto) {
+    doc.role = 'user';
     return this.usersService.upsert(doc);
   }
 }
