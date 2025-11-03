@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
+import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 
 @Controller('appointments')
 export class AppointmentsController {
@@ -60,5 +61,29 @@ export class AppointmentsController {
   @HttpCode(HttpStatus.OK)
   reject(@Param('id') id: string) {
     return this.appointmentsService.reject(id);
+  }
+
+  @Patch(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancel(@Param('id') id: string) {
+    return this.appointmentsService.cancel(id);
+  }
+
+  @Patch(':id/reschedule')
+  @HttpCode(HttpStatus.OK)
+  reschedule(
+    @Param('id') id: string,
+    @Body() rescheduleDto: RescheduleAppointmentDto,
+  ) {
+    return this.appointmentsService.reschedule(id, rescheduleDto);
+  }
+
+  @Patch(':id/notes')
+  @HttpCode(HttpStatus.OK)
+  updateDentistNotes(
+    @Param('id') id: string,
+    @Body('clinicNotes') clinicNotes: string
+  ) {
+    return this.appointmentsService.updateDentistNotes(id, clinicNotes);
   }
 }
