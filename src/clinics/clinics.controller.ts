@@ -24,7 +24,6 @@ export class ClinicsController {
   @HttpCode(HttpStatus.OK)
   @Get(':id')
   findOne(@Param('id') id: string) {
-    console.log('clinic id dapat: ', id);
     return this.clinicsService.findOne(id);
   }
 

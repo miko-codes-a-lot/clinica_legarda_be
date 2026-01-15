@@ -68,4 +68,7 @@ export class AppointmentUpsertDto {
   @ValidateNested()
   @Type(() => AppointmentNoteDto)
   notes?: AppointmentNoteDto;
+
+  @IsOptional()
+  referral: string;
 }

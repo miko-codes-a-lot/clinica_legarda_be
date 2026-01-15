@@ -4,6 +4,7 @@ import { AppointmentStatus } from 'src/_shared/enum/appointment-status.enum';
 import { Clinic } from 'src/clinics/entities/clinic.entity'; // <-- Adjust path as needed
 import { DentalCatalog } from 'src/dental-catalog/entities/dental-catalog.entity';
 import { User } from 'src/users/entities/user.entity'; // <-- Adjust path as needed
+import { Referral } from 'src/referral/entities/referral.entity';
 
 @Schema({
   _id: false,
@@ -67,6 +68,9 @@ export class Appointment {
 
   @Prop({ type: [AppointmentHistory], default: [] })
   history: AppointmentHistory[];
+
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Referral', required: false })
+  referral: Referral;
 }
 
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);

@@ -37,6 +37,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
+    "dayjs": "^1.11.19",
     "mongoose": "^8.18.1",
     "multer": "^2.0.2",
     "reflect-metadata": "^0.2.2",

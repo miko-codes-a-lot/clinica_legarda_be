@@ -49,6 +49,14 @@ export class User {
 
   @Prop()
   role: string;
+
+  // DAILY CAPACITY
+  @Prop({ default: 480 })
+  maxWorkingMinutesPerDay: number;
+
+  // BUFFER BETWEEN APPOINTMENTS
+  @Prop({ default: 15 })
+  appointmentBufferMinutes: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
