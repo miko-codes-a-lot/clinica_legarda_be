@@ -5,6 +5,7 @@ import mongoose, { Model } from 'mongoose';
 import { ReferralUpsertDto } from './dto/referral-upsert.dto';
 import { Appointment } from 'src/appointments/entities/appointment.entity'; // import Appointment entity
 import { ReferralStatus } from 'src/_shared/enum/referral-status.enum';
+import { AppointmentsService } from '../appointments/appointments.service'
 
 @Injectable()
 export class ReferralsService {
@@ -14,6 +15,7 @@ export class ReferralsService {
 
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
+    private  appointmentService: AppointmentsService,
   ) {}
 
   async findAll() {
@@ -74,11 +76,23 @@ export class ReferralsService {
     );
   }
 
-  reject(id: string) {
-    return this.updateStatus(
+  async reject(reasonOfDecline: string, id: string) {
+    // fetch the appointment by referral ID
+    const appointments = await this.appointmentService.findAll();
+
+    const getReferral = appointments.find(
+      (a) => a?.referral?._id?.toString() === id
+    );
+    if (getReferral?._id) {
+      this.appointmentService.reject(getReferral._id.toString());
+    }
+    return this.referralModel.findByIdAndUpdate(
       id,
-      ReferralStatus.REJECTED,
-      // 'Referral rejected.',
+      {
+        status: ReferralStatus.REJECTED,
+        reasonOfDecline: reasonOfDecline,
+      },
+      { new: true }
     );
   }
 

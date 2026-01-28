@@ -48,8 +48,8 @@ export class ReferralsController {
 
   @Patch(':id/reject')
   @HttpCode(HttpStatus.OK)
-  reject(@Param('id') id: string) {
-    return this.referralsService.reject(id);
+  reject(@Param('id') id: string, @Body('reasonOfDecline') reasonOfDecline: string) {
+    return this.referralsService.reject(reasonOfDecline, id);
   }
 
   @Get('by-dentist/:dentistId')

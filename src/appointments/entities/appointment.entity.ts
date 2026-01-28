@@ -70,7 +70,7 @@ export class Appointment {
   history: AppointmentHistory[];
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Referral', required: false })
-  referral: Referral;
+  referral?: mongoose.Types.ObjectId;
 }
 
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);

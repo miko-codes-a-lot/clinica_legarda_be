@@ -11,11 +11,13 @@ import {
 import { ClinicsService } from './clinics.service';
 import { ClinicUpsertDto } from './dto/clinic-upsert.dto';
 
+import { Public } from '../auth/auth.guard';
+
 @Controller('clinics')
 export class ClinicsController {
   constructor(private readonly clinicsService: ClinicsService) {}
 
-  @HttpCode(HttpStatus.OK)
+  @Public()
   @Get()
   findAll() {
     return this.clinicsService.findAll();

@@ -19,5 +19,6 @@ import {
   ],
   controllers: [AppointmentsController],
   providers: [AppointmentsService],
+  exports: [AppointmentsService], // ✅ REQUIRED
 })
 export class AppointmentsModule {}

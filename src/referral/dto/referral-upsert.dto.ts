@@ -21,6 +21,9 @@ export class ReferralUpsertDto {
   reason: string;
 
   @IsOptional()
+  reasonOfDecline: string;
+
+  @IsOptional()
   appointment: String;
 
   @IsOptional()

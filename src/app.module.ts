@@ -14,6 +14,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ReferralsModule } from './referral/referrals.module';
+import { ReasonModule } from './reason/reason.module';
 import { join } from 'path';
 
 @Module({
@@ -39,7 +40,8 @@ import { join } from 'path';
     AppointmentsModule,
     NotificationsModule,
     AnalyticsModule,
-    ReferralsModule
+    ReferralsModule,
+    ReasonModule
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -4,6 +4,7 @@ import { ReferralsController } from './referrals.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Referral, ReferralSchema } from './entities/referral.entity';
 import { Appointment, AppointmentSchema } from '../appointments/entities/appointment.entity';
+import { AppointmentsModule } from '../appointments/appointments.module'
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { Appointment, AppointmentSchema } from '../appointments/entities/appoint
       { name: Referral.name, schema: ReferralSchema },
       { name: Appointment.name, schema: AppointmentSchema }, // <-- add this
     ]),
+    AppointmentsModule
   ],
   controllers: [ReferralsController],
   providers: [ReferralsService],

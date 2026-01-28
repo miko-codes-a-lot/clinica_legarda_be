@@ -22,6 +22,9 @@ export class Referral {
   @Prop({ trim: true })
   reason: string;
 
+  @Prop({ trim: true })
+  reasonOfDecline: string;
+
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', required: false })
   appointment?: Appointment;
 
