@@ -65,6 +65,9 @@ export class User {
     default: UserStatus.PENDING,
   })
   status: UserStatus;
+
+  @Prop()
+  otpVerifiedAt?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

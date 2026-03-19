@@ -75,6 +75,14 @@ export class UsersService {
     );
   }
 
+  updateOtpVerifiedAt(userId: string) {
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      { $set: { otpVerifiedAt: new Date() } },
+      { new: true },
+    );
+  }
+
   reject(id: string) {
     return this.updateStatus(
       id,

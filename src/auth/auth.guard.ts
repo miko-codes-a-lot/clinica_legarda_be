@@ -36,9 +36,15 @@ export class AuthGuard implements CanActivate {
     if (!token) throw new UnauthorizedException('Auth token not found');
 
     try {
-      const payload: unknown = await this.authService.verifyJwt(token);
+      const payload: any = await this.authService.verifyJwt(token);
+
+      if (payload.otpPending) {
+        throw new UnauthorizedException('OTP verification required');
+      }
+
       request['user'] = payload;
-    } catch {
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
       throw new UnauthorizedException('Invalid or expired token.');
     }
 
