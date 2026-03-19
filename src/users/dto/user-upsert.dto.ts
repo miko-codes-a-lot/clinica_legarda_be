@@ -7,8 +7,10 @@ import {
   IsOptional,
   IsString,
   ValidateNested,
+  IsEnum,
 } from 'class-validator';
 import { OperatingHourDto } from 'src/_shared/dto/operating-hour.dto';
+import { UserStatus } from 'src/_shared/enum/user-status.enum';
 
 export class UserUpsertDto {
   @IsNotEmpty()
@@ -50,4 +52,8 @@ export class UserUpsertDto {
 
   @IsString()
   role: string;
+  
+  @IsOptional()
+  @IsEnum(UserStatus)
+  status?: UserStatus;
 }

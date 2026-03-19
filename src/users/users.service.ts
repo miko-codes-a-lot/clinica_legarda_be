@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './entities/user.entity';
 import mongoose, { Model } from 'mongoose';
 import { UserUpsertDto } from './dto/user-upsert.dto';
 import * as bcrypt from 'bcrypt';
+import { UserStatus } from 'src/_shared/enum/user-status.enum';
 
 @Injectable()
 export class UsersService {
@@ -65,5 +66,47 @@ export class UsersService {
       },
       { upsert: true, new: true },
     );
+  }
+
+  approve(id: string) {
+    return this.updateStatus(
+      id,
+      UserStatus.CONFIRMED,
+    );
+  }
+
+  reject(id: string) {
+    return this.updateStatus(
+      id,
+      UserStatus.REJECTED,
+    );
+  }
+
+  private async updateStatus(
+    id: string,
+    status: UserStatus,
+  ) {
+
+    const currentUser = await this.userModel.findById(id).exec();
+
+    if (!currentUser) {
+      throw new NotFoundException(`User with ID "${id}" not found.`);
+    }
+ 
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(
+        id,
+        {
+          $set: { status },
+        },
+        { new: true },
+      )
+      .populate('clinic')
+      .exec();
+
+    if (!updatedUser) {
+      throw new NotFoundException(`User with ID "${id}" not found.`);
+    }
+    return updatedUser;
   }
 }

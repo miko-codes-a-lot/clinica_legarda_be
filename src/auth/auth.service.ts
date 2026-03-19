@@ -26,6 +26,12 @@ export class AuthService {
     if (!isCorrectPwd)
       throw new BadRequestException('Username or password is incorrect');
 
+    if (user.status && user.status === 'pending')
+      throw new BadRequestException('Account is under verification')
+
+    if (user.status && user.status === 'rejected')
+      throw new BadRequestException('Account is rejected')
+
     user.password = undefined;
 
     const payload = {
