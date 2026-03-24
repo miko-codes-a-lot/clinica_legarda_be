@@ -5,11 +5,10 @@ export default () => ({
     uri: process.env.DATABASE_URI,
     name: process.env.DATABASE_NAME,
   },
-  smtp: {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '', 10) || 587,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+  gmail: {
+    clientId: process.env.GMAIL_CLIENT_ID,
+    clientSecret: process.env.GMAIL_CLIENT_SECRET,
+    refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+    from: process.env.GMAIL_FROM_EMAIL,
   },
 });
