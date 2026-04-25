@@ -11,4 +11,7 @@ export default () => ({
     refreshToken: process.env.GMAIL_REFRESH_TOKEN,
     from: process.env.GMAIL_FROM_EMAIL,
   },
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  },
 });

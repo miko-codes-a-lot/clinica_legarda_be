@@ -15,6 +15,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ReferralsModule } from './referral/referrals.module';
 import { ReasonModule } from './reason/reason.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 import { join } from 'path';
 
 @Module({
@@ -41,7 +42,8 @@ import { join } from 'path';
     NotificationsModule,
     AnalyticsModule,
     ReferralsModule,
-    ReasonModule
+    ReasonModule,
+    ChatbotModule
   ],
   controllers: [AppController],
   providers: [AppService],
