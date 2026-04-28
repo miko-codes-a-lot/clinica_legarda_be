@@ -32,12 +32,6 @@ export class AuthService {
     if (!isCorrectPwd)
       throw new BadRequestException('Username or password is incorrect');
 
-    if (user.status && user.status === 'pending')
-      throw new BadRequestException('Account is under verification');
-
-    if (user.status && user.status === 'rejected')
-      throw new BadRequestException('Account is rejected');
-
     user.password = undefined;
 
     // Check if OTP was verified within the last 24 hours
@@ -99,12 +93,6 @@ export class AuthService {
 
     const user = await this.userService.findOne(userId);
     if (!user) throw new BadRequestException('User not found');
-
-    // Re-check user status in case it changed during OTP flow
-    if (user.status === 'pending')
-      throw new BadRequestException('Account is under verification');
-    if (user.status === 'rejected')
-      throw new BadRequestException('Account is rejected');
 
     await this.userService.updateOtpVerifiedAt(userId);
     await this.otpService.deleteForUser(userId);

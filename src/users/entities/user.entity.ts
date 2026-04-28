@@ -2,7 +2,6 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
 import { OperatingHour } from 'src/_shared/entities/operating-hour';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
-import { UserStatus } from 'src/_shared/enum/user-status.enum';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -58,13 +57,6 @@ export class User {
   // BUFFER BETWEEN APPOINTMENTS
   @Prop({ default: 15 })
   appointmentBufferMinutes: number;
-
-  @Prop({
-    type: String,
-    enum: UserStatus,
-    default: UserStatus.PENDING,
-  })
-  status: UserStatus;
 
   @Prop()
   otpVerifiedAt?: Date;

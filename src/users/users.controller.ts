@@ -11,7 +11,6 @@ import {
   Res,
   UploadedFile,
   UseInterceptors,
-  Patch,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from 'src/_shared/decorators/user.decorator';
@@ -154,17 +153,5 @@ export class UsersController {
   async register(@Body() doc: UserUpsertDto) {
     doc.role = 'user';
     return this.usersService.upsert(doc);
-  }
-
-  @Patch(':id/approve')
-  @HttpCode(HttpStatus.OK)
-  approve(@Param('id') id: string) {
-    return this.usersService.approve(id);
-  }
-
-  @Patch(':id/reject')
-  @HttpCode(HttpStatus.OK)
-  reject(@Param('id') id: string) {
-    return this.usersService.reject(id);
   }
 }
