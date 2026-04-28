@@ -60,6 +60,15 @@ export class User {
 
   @Prop()
   otpVerifiedAt?: Date;
+
+  @Prop({ select: false })
+  resetOtp?: string;
+
+  @Prop({ select: false })
+  resetOtpExpires?: Date;
+
+  @Prop({ select: false, default: false })
+  resetOtpVerified?: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

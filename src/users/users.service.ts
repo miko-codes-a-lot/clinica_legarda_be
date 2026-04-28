@@ -18,6 +18,12 @@ export class UsersService {
       .populate('clinic');
   }
 
+  findForResetOtp(emailAddress: string) {
+    return this.userModel
+      .findOne({ emailAddress })
+      .select('+password +resetOtp +resetOtpExpires +resetOtpVerified');
+  }
+
   findAll(role?: string) {
     return this.userModel.find({
       ...(role && { role }),

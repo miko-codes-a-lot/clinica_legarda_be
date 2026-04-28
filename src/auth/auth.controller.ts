@@ -2,6 +2,11 @@ import { Controller, Post, Body, Res, Req, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/sign-in.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import {
+  ForgotPasswordOtpDto,
+  VerifyResetOtpDto,
+  ResetPasswordOtpDto,
+} from './dto/auth-reset-otp.dto';
 import { Request, Response } from 'express';
 import { Public } from './auth.guard';
 
@@ -110,5 +115,29 @@ export class AuthController {
     });
 
     return res.status(HttpStatus.NO_CONTENT).send();
+  }
+
+  @Public()
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: ForgotPasswordOtpDto) {
+    await this.authService.generateResetOtp(dto.emailAddress);
+    return { message: 'If account exists, OTP sent.' };
+  }
+
+  @Public()
+  @Post('verify-reset-otp')
+  async verifyResetOtp(@Body() dto: VerifyResetOtpDto) {
+    await this.authService.verifyResetOtp(dto.emailAddress, dto.otp);
+    return { message: 'OTP verified' };
+  }
+
+  @Public()
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordOtpDto) {
+    await this.authService.resetPasswordWithOtp(
+      dto.emailAddress,
+      dto.newPassword,
+    );
+    return { message: 'Password successfully reset' };
   }
 }
