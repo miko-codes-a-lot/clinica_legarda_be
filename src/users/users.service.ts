@@ -92,6 +92,28 @@ export class UsersService {
     );
   }
 
+  async delete(id: string) {
+    const user = await this.userModel.findById(id);
+
+    if (!user) {
+      throw new NotFoundException(`User with ID "${id}" not found.`);
+    }
+
+    // Optional protection
+    // Prevent deleting main admins
+    if (user.role === 'super-admin') {
+      throw new BadRequestException(
+        'Super admin accounts cannot be deleted.',
+      );
+    }
+
+    await this.userModel.findByIdAndDelete(id);
+
+    return {
+      message: 'User deleted successfully.',
+    };
+  }
+
 
   updateOtpVerifiedAt(userId: string) {
     return this.userModel.findByIdAndUpdate(

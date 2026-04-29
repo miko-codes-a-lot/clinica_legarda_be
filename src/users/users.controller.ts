@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -145,6 +146,12 @@ export class UsersController {
   @Put(':id')
   update(@Param('id') id: string, @Body() doc: UserUpsertDto) {
     return this.usersService.upsert(doc, id);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Delete(':id')
+  delete(@Param('id') id: string) {
+    return this.usersService.delete(id);
   }
 
   @Public()
