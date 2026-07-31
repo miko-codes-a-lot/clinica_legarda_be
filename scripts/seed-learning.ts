@@ -1,4 +1,3 @@
-import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import mongoose, { Model, Types } from 'mongoose';
 import {
@@ -37,18 +36,22 @@ type SeedDocument = {
 type VerificationSummary = {
   database: string;
   verifyOnly: boolean;
-  passwordWasSupplied: boolean;
-  passwordsWereReset: boolean;
-  otpWasMarkedVerified: boolean;
   collections: Record<string, { managed: number; total: number }>;
   references: {
     checked: number;
     valid: boolean;
   };
+  credentials: {
+    checked: number;
+    password: string;
+    passwordHashesValid: boolean;
+    otpVerifiedAtSet: boolean;
+  };
 };
 
 const DEFAULT_DATABASE_URI = 'mongodb://127.0.0.1:27017/?directConnection=true';
 const DEFAULT_DATABASE_NAME = 'clinica_legarda';
+const LEARNING_USER_PASSWORD = 'password';
 const PROTECTED_DATABASES = new Set(['admin', 'config', 'local']);
 
 const id = (hex: string) => new Types.ObjectId(hex);
@@ -149,11 +152,19 @@ function assertSafeTarget(uri: string, databaseName: string): void {
 
   const remoteAllowed = process.env.ALLOW_REMOTE_SEED === 'true';
   const confirmedDatabase = process.env.SEED_CONFIRM_DATABASE;
+  const insecureCredentialsAllowed =
+    process.env.ALLOW_INSECURE_LEARNING_CREDENTIALS === 'true';
 
-  if (!remoteAllowed || confirmedDatabase !== databaseName) {
+  if (
+    !remoteAllowed ||
+    confirmedDatabase !== databaseName ||
+    !insecureCredentialsAllowed
+  ) {
     throw new Error(
-      'Remote seeding is disabled. Set ALLOW_REMOTE_SEED=true and ' +
-        `SEED_CONFIRM_DATABASE=${databaseName} to confirm the exact target.`,
+      'Remote seeding is disabled. Set ALLOW_REMOTE_SEED=true, ' +
+        `SEED_CONFIRM_DATABASE=${databaseName}, and ` +
+        'ALLOW_INSECURE_LEARNING_CREDENTIALS=true to confirm the exact ' +
+        'target and acknowledge the shared learning password.',
     );
   }
 }
@@ -175,18 +186,18 @@ function createSeedData() {
   const clinics: SeedDocument[] = [
     {
       _id: ids.clinics.legarda,
-      name: 'Clinica Legarda Learning Dental Center',
-      address: '101 Learning Avenue, Sampaloc, Manila',
-      mobileNumber: '+639000000101',
-      emailAddress: 'legarda-clinic@example.test',
+      name: 'Clinica Legarda Dental Center',
+      address: 'Unit 2B, 241 Legarda Street, Sampaloc, Manila',
+      mobileNumber: '+639171110101',
+      emailAddress: 'appointments.legarda@example.test',
       operatingHours: extendedHours,
     },
     {
       _id: ids.clinics.sampaloc,
-      name: 'Sampaloc Community Dental Training Clinic',
-      address: '202 Practice Street, Sampaloc, Manila',
-      mobileNumber: '+639000000102',
-      emailAddress: 'sampaloc-clinic@example.test',
+      name: 'Sampaloc Family Dental Clinic',
+      address: 'Ground Floor, 88 Dapitan Street, Sampaloc, Manila',
+      mobileNumber: '+639171110102',
+      emailAddress: 'appointments.sampaloc@example.test',
       operatingHours: weekdayHours,
     },
   ];
@@ -312,13 +323,13 @@ function createSeedData() {
   const users: SeedDocument[] = [
     {
       _id: ids.users.superAdmin,
-      firstName: 'Morgan',
-      middleName: 'Learning',
-      lastName: 'Reyes',
-      emailAddress: 'superadmin@example.test',
-      mobileNumber: '+639000000201',
-      address: '1 Admin Lane, Manila',
-      username: 'learning.superadmin',
+      firstName: 'Maria',
+      middleName: 'Lourdes',
+      lastName: 'Santos',
+      emailAddress: 'maria.santos@example.test',
+      mobileNumber: '+639171112001',
+      address: 'Magsaysay Boulevard, Santa Mesa, Manila',
+      username: 'maria.santos',
       role: 'super-admin',
       operatingHours: [],
       maxWorkingMinutesPerDay: 480,
@@ -326,13 +337,13 @@ function createSeedData() {
     },
     {
       _id: ids.users.admin,
-      firstName: 'Casey',
-      middleName: 'Demo',
-      lastName: 'Santos',
-      emailAddress: 'admin@example.test',
-      mobileNumber: '+639000000202',
-      address: '2 Admin Lane, Manila',
-      username: 'learning.admin',
+      firstName: 'Carlo',
+      middleName: 'Miguel',
+      lastName: 'Reyes',
+      emailAddress: 'carlo.reyes@example.test',
+      mobileNumber: '+639171112002',
+      address: 'Legarda Street, Sampaloc, Manila',
+      username: 'carlo.reyes',
       role: 'admin',
       operatingHours: [],
       maxWorkingMinutesPerDay: 480,
@@ -341,12 +352,12 @@ function createSeedData() {
     {
       _id: ids.users.dentistAna,
       firstName: 'Ana',
-      middleName: 'Demo',
+      middleName: 'Patricia',
       lastName: 'Cruz',
-      emailAddress: 'ana.dentist@example.test',
-      mobileNumber: '+639000000203',
-      address: '3 Dentist Road, Manila',
-      username: 'learning.dentist.ana',
+      emailAddress: 'ana.cruz@example.test',
+      mobileNumber: '+639171112101',
+      address: 'Fajardo Street, Sampaloc, Manila',
+      username: 'ana.cruz',
       role: 'dentist',
       clinic: ids.clinics.legarda,
       operatingHours: extendedHours,
@@ -356,12 +367,12 @@ function createSeedData() {
     {
       _id: ids.users.dentistMiguel,
       firstName: 'Miguel',
-      middleName: 'Demo',
+      middleName: 'Antonio',
       lastName: 'Garcia',
-      emailAddress: 'miguel.dentist@example.test',
-      mobileNumber: '+639000000204',
-      address: '4 Dentist Road, Manila',
-      username: 'learning.dentist.miguel',
+      emailAddress: 'miguel.garcia@example.test',
+      mobileNumber: '+639171112102',
+      address: 'G. Tuazon Street, Sampaloc, Manila',
+      username: 'miguel.garcia',
       role: 'dentist',
       clinic: ids.clinics.legarda,
       operatingHours: weekdayHours,
@@ -371,12 +382,12 @@ function createSeedData() {
     {
       _id: ids.users.dentistSofia,
       firstName: 'Sofia',
-      middleName: 'Demo',
+      middleName: 'Marie',
       lastName: 'Lim',
-      emailAddress: 'sofia.dentist@example.test',
-      mobileNumber: '+639000000205',
-      address: '5 Dentist Road, Manila',
-      username: 'learning.dentist.sofia',
+      emailAddress: 'sofia.lim@example.test',
+      mobileNumber: '+639171112103',
+      address: 'España Boulevard, Sampaloc, Manila',
+      username: 'sofia.lim',
       role: 'dentist',
       clinic: ids.clinics.sampaloc,
       operatingHours: weekdayHours,
@@ -386,12 +397,12 @@ function createSeedData() {
     {
       _id: ids.users.patientAlex,
       firstName: 'Alex',
-      middleName: 'Demo',
+      middleName: 'Paolo',
       lastName: 'Rivera',
-      emailAddress: 'alex.patient@example.test',
-      mobileNumber: '+639000000206',
-      address: '6 Patient Street, Manila',
-      username: 'learning.patient.alex',
+      emailAddress: 'alex.rivera@example.test',
+      mobileNumber: '+639171113001',
+      address: 'Earnshaw Street, Sampaloc, Manila',
+      username: 'alex.rivera',
       role: 'user',
       operatingHours: [],
       maxWorkingMinutesPerDay: 480,
@@ -400,12 +411,12 @@ function createSeedData() {
     {
       _id: ids.users.patientJamie,
       firstName: 'Jamie',
-      middleName: 'Demo',
+      middleName: 'Nicole',
       lastName: 'Flores',
-      emailAddress: 'jamie.patient@example.test',
-      mobileNumber: '+639000000207',
-      address: '7 Patient Street, Manila',
-      username: 'learning.patient.jamie',
+      emailAddress: 'jamie.flores@example.test',
+      mobileNumber: '+639171113002',
+      address: 'Loyola Street, Sampaloc, Manila',
+      username: 'jamie.flores',
       role: 'user',
       operatingHours: [],
       maxWorkingMinutesPerDay: 480,
@@ -414,12 +425,12 @@ function createSeedData() {
     {
       _id: ids.users.patientSam,
       firstName: 'Sam',
-      middleName: 'Demo',
+      middleName: 'Luis',
       lastName: 'Navarro',
-      emailAddress: 'sam.patient@example.test',
-      mobileNumber: '+639000000208',
-      address: '8 Patient Street, Manila',
-      username: 'learning.patient.sam',
+      emailAddress: 'sam.navarro@example.test',
+      mobileNumber: '+639171113003',
+      address: 'Vicente Cruz Street, Sampaloc, Manila',
+      username: 'sam.navarro',
       role: 'user',
       operatingHours: [],
       maxWorkingMinutesPerDay: 480,
@@ -428,12 +439,12 @@ function createSeedData() {
     {
       _id: ids.users.patientTaylor,
       firstName: 'Taylor',
-      middleName: 'Demo',
+      middleName: 'Anne',
       lastName: 'Mendoza',
-      emailAddress: 'taylor.patient@example.test',
-      mobileNumber: '+639000000209',
-      address: '9 Patient Street, Manila',
-      username: 'learning.patient.taylor',
+      emailAddress: 'taylor.mendoza@example.test',
+      mobileNumber: '+639171113004',
+      address: 'Dapitan Street, Sampaloc, Manila',
+      username: 'taylor.mendoza',
       role: 'user',
       operatingHours: [],
       maxWorkingMinutesPerDay: 480,
@@ -453,8 +464,10 @@ function createSeedData() {
       endTime: '10:15',
       status: AppointmentStatus.CONFIRMED,
       notes: {
-        patientNotes: 'First visit to the learning clinic.',
-        clinicNotes: 'Review brushing technique during consultation.',
+        patientNotes:
+          'First visit. Mild gum bleeding while brushing for the past week.',
+        clinicNotes:
+          'Complete oral examination before prophylaxis and review home care.',
       },
       history: [
         { action: 'Appointment created.' },
@@ -472,8 +485,9 @@ function createSeedData() {
       endTime: '11:30',
       status: AppointmentStatus.PENDING,
       notes: {
-        patientNotes: 'Sensitive tooth on the upper left side.',
-        clinicNotes: '',
+        patientNotes:
+          'Upper-left molar is sensitive to cold drinks and sweet food.',
+        clinicNotes: 'Confirm the affected tooth during examination.',
       },
       history: [{ action: 'Appointment created.' }],
     },
@@ -488,8 +502,9 @@ function createSeedData() {
       endTime: '13:30',
       status: AppointmentStatus.COMPLETED,
       notes: {
-        patientNotes: 'Routine check-up.',
-        clinicNotes: 'No urgent concerns found.',
+        patientNotes: 'Routine six-month dental check-up.',
+        clinicNotes:
+          'No caries observed. Advised continued twice-daily brushing.',
       },
       history: [
         { action: 'Appointment created.' },
@@ -508,8 +523,9 @@ function createSeedData() {
       endTime: '10:15',
       status: AppointmentStatus.PENDING,
       notes: {
-        patientNotes: 'Interested in alignment options.',
-        clinicNotes: '',
+        patientNotes:
+          'Would like to discuss braces for lower-front tooth crowding.',
+        clinicNotes: 'Prepare orthodontic assessment form.',
       },
       history: [{ action: 'Appointment created.' }],
     },
@@ -524,8 +540,8 @@ function createSeedData() {
       endTime: '15:30',
       status: AppointmentStatus.CANCELLED,
       notes: {
-        patientNotes: 'Schedule conflict.',
-        clinicNotes: '',
+        patientNotes: 'Unable to attend because of a work schedule change.',
+        clinicNotes: 'Patient will contact the clinic to rebook.',
       },
       history: [
         { action: 'Appointment created.' },
@@ -562,8 +578,10 @@ function createSeedData() {
       endTime: '17:00',
       status: AppointmentStatus.REJECTED,
       notes: {
-        patientNotes: 'Requested an afternoon slot.',
-        clinicNotes: 'Needs additional imaging before scheduling.',
+        patientNotes:
+          'Persistent pain in a previously restored lower-right molar.',
+        clinicNotes:
+          'Recent periapical imaging is required before scheduling treatment.',
       },
       history: [
         { action: 'Appointment created.' },
@@ -581,8 +599,10 @@ function createSeedData() {
       endTime: '12:30',
       status: AppointmentStatus.CONFIRMED,
       notes: {
-        patientNotes: 'Referred from the training clinic.',
-        clinicNotes: 'Review existing imaging before treatment.',
+        patientNotes:
+          'Referred by Dr. Sofia Lim after an initial consultation.',
+        clinicNotes:
+          'Review the referral notes and existing imaging before treatment.',
       },
       history: [
         { action: 'Appointment created from referral.' },
@@ -706,32 +726,19 @@ async function upsertUsers(
   model: Model<unknown>,
   documents: SeedDocument[],
   passwordHash: string,
-  resetPasswords: boolean,
-  markOtpVerified: boolean,
   session: mongoose.ClientSession,
 ): Promise<void> {
   for (const document of documents) {
     const { _id, ...fields } = document;
-    const setFields: Record<string, unknown> = { ...fields };
-    const setOnInsert: Record<string, unknown> = {};
-
-    if (resetPasswords) {
-      setFields.password = passwordHash;
-    } else {
-      setOnInsert.password = passwordHash;
-    }
-
-    if (markOtpVerified) {
-      setFields.otpVerifiedAt = new Date();
-    }
 
     await model.updateOne(
       { _id },
       {
-        $set: setFields,
-        ...(Object.keys(setOnInsert).length > 0 && {
-          $setOnInsert: setOnInsert,
-        }),
+        $set: {
+          ...fields,
+          password: passwordHash,
+          otpVerifiedAt: new Date(),
+        },
       },
       {
         upsert: true,
@@ -868,6 +875,36 @@ async function verifyReferences(
   return checked;
 }
 
+async function verifyCredentials(
+  models: ReturnType<typeof defineModels>,
+  data: ReturnType<typeof createSeedData>,
+): Promise<number> {
+  const users = await models.User.find({
+    _id: { $in: data.users.map(({ _id }) => _id) },
+  })
+    .select('+password')
+    .lean();
+
+  for (const user of users) {
+    if (
+      !user.password ||
+      !(await bcrypt.compare(LEARNING_USER_PASSWORD, user.password))
+    ) {
+      throw new Error(
+        `Seed verification failed: invalid learning password for user ${user._id.toString()}.`,
+      );
+    }
+
+    if (!user.otpVerifiedAt) {
+      throw new Error(
+        `Seed verification failed: OTP session was not prepared for user ${user._id.toString()}.`,
+      );
+    }
+  }
+
+  return users.length;
+}
+
 async function collectionSummary(
   model: Model<unknown>,
   managedIds: Types.ObjectId[],
@@ -884,9 +921,6 @@ async function verifySeed(
   data: ReturnType<typeof createSeedData>,
   databaseName: string,
   verifyOnly: boolean,
-  passwordWasSupplied: boolean,
-  passwordsWereReset: boolean,
-  otpWasMarkedVerified: boolean,
 ): Promise<VerificationSummary> {
   const collections = {
     clinics: await collectionSummary(
@@ -944,17 +978,21 @@ async function verifySeed(
   }
 
   const checkedReferences = await verifyReferences(models, data);
+  const checkedCredentials = await verifyCredentials(models, data);
 
   return {
     database: databaseName,
     verifyOnly,
-    passwordWasSupplied,
-    passwordsWereReset,
-    otpWasMarkedVerified,
     collections,
     references: {
       checked: checkedReferences,
       valid: true,
+    },
+    credentials: {
+      checked: checkedCredentials,
+      password: LEARNING_USER_PASSWORD,
+      passwordHashesValid: true,
+      otpVerifiedAtSet: true,
     },
   };
 }
@@ -964,19 +1002,8 @@ async function main(): Promise<void> {
   const databaseName =
     process.env.DATABASE_NAME?.trim() || DEFAULT_DATABASE_NAME;
   const verifyOnly = process.argv.includes('--verify-only');
-  const suppliedPassword = process.env.SEED_USER_PASSWORD;
-  const resetPasswords = process.env.SEED_RESET_PASSWORDS === 'true';
-  const markOtpVerified = process.env.SEED_MARK_OTP_VERIFIED === 'true';
 
   assertSafeTarget(uri, databaseName);
-
-  if (suppliedPassword && suppliedPassword.length < 12) {
-    throw new Error('SEED_USER_PASSWORD must contain at least 12 characters.');
-  }
-
-  if (resetPasswords && !suppliedPassword) {
-    throw new Error('SEED_RESET_PASSWORDS=true requires SEED_USER_PASSWORD.');
-  }
 
   await mongoose.connect(uri, { dbName: databaseName });
 
@@ -988,8 +1015,7 @@ async function main(): Promise<void> {
       await model.createIndexes();
     }
 
-    const password = suppliedPassword || randomBytes(48).toString('base64url');
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(LEARNING_USER_PASSWORD, 10);
     const session = await mongoose.startSession();
 
     try {
@@ -997,14 +1023,7 @@ async function main(): Promise<void> {
         await upsertDocuments(models.Clinic, data.clinics, session);
         await upsertDocuments(models.DentalCatalog, data.services, session);
         await upsertDocuments(models.Reason, data.reasons, session);
-        await upsertUsers(
-          models.User,
-          data.users,
-          passwordHash,
-          resetPasswords,
-          markOtpVerified,
-          session,
-        );
+        await upsertUsers(models.User, data.users, passwordHash, session);
         await upsertDocuments(models.Appointment, data.appointments, session);
         await upsertDocuments(models.Referral, data.referrals, session);
         await upsertDocuments(models.Notification, data.notifications, session);
@@ -1014,25 +1033,9 @@ async function main(): Promise<void> {
     }
   }
 
-  const summary = await verifySeed(
-    models,
-    data,
-    databaseName,
-    verifyOnly,
-    Boolean(suppliedPassword),
-    resetPasswords,
-    markOtpVerified,
-  );
+  const summary = await verifySeed(models, data, databaseName, verifyOnly);
 
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
-
-  if (!verifyOnly && !suppliedPassword) {
-    process.stdout.write(
-      'Seed users received undisclosed random passwords. ' +
-        'Rerun with SEED_USER_PASSWORD and SEED_RESET_PASSWORDS=true ' +
-        'to set a known local learning password without storing it in Git.\n',
-    );
-  }
 }
 
 async function run(): Promise<void> {

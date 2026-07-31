@@ -49,41 +49,29 @@ npm run seed:learning
 npm run seed:learning:verify
 ```
 
-The first run creates users with secure random passwords that are intentionally
-not printed or saved.
+Every seed run resets all managed learning accounts to:
 
-## Set a known local learning password
-
-Read the password silently, export it only for the seed process, and remove it
-from the shell afterward:
-
-```sh
-printf 'Learning password: '
-read -s SEED_USER_PASSWORD
-printf '\n'
-export SEED_USER_PASSWORD
-SEED_RESET_PASSWORDS=true SEED_MARK_OTP_VERIFIED=true npm run seed:learning
-unset SEED_USER_PASSWORD
+```text
+password: password
 ```
 
-Requirements:
+It also refreshes `otpVerifiedAt`, allowing local sign-in without sending an
+OTP for the application's existing 24-hour grace period. Rerun the seed when
+that local testing window expires.
 
-- at least 12 characters;
-- never put the password in a committed file or command-line argument;
-- `SEED_MARK_OTP_VERIFIED=true` provides only the application's existing
-  24-hour OTP grace period.
+Learning accounts:
 
-Seed usernames:
-
-- `learning.superadmin`
-- `learning.admin`
-- `learning.dentist.ana`
-- `learning.dentist.miguel`
-- `learning.dentist.sofia`
-- `learning.patient.alex`
-- `learning.patient.jamie`
-- `learning.patient.sam`
-- `learning.patient.taylor`
+| Role        | Name                  | Username         |
+| ----------- | --------------------- | ---------------- |
+| Super-admin | Maria Lourdes Santos  | `maria.santos`   |
+| Admin       | Carlo Miguel Reyes    | `carlo.reyes`    |
+| Dentist     | Ana Patricia Cruz     | `ana.cruz`       |
+| Dentist     | Miguel Antonio Garcia | `miguel.garcia`  |
+| Dentist     | Sofia Marie Lim       | `sofia.lim`      |
+| Patient     | Alex Paolo Rivera     | `alex.rivera`    |
+| Patient     | Jamie Nicole Flores   | `jamie.flores`   |
+| Patient     | Sam Luis Navarro      | `sam.navarro`    |
+| Patient     | Taylor Anne Mendoza   | `taylor.mendoza` |
 
 All names, email addresses, phone numbers, addresses, clinical notes, and
 appointments are fictional learning data.
@@ -105,16 +93,21 @@ file outside Git or a secret manager when authentication is enabled.
 
 ## Remote safety gate
 
-Remote MongoDB URIs are rejected by default. A remote seed requires both an
-explicit allow flag and an exact database-name confirmation:
+Remote MongoDB URIs are rejected by default. Because the learning users share
+the intentionally weak password `password`, a remote seed requires an explicit
+allow flag, an exact database-name confirmation, and a separate acknowledgment
+of the insecure credentials:
 
 ```sh
 ALLOW_REMOTE_SEED=true \
 SEED_CONFIRM_DATABASE='clinica_legarda' \
+ALLOW_INSECURE_LEARNING_CREDENTIALS=true \
 DATABASE_URI='<provided securely outside Git>' \
 DATABASE_NAME='clinica_legarda' \
 npm run seed:learning
 ```
+
+Never expose a remotely seeded learning database through a public API.
 
 The script never calls `dropDatabase`, deletes a collection, or deletes
 documents. It only upserts its deterministic learning records and creates the
