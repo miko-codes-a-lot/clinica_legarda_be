@@ -23,6 +23,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { existsSync, statSync } from 'fs';
 import { Public } from 'src/auth/auth.guard';
+import { UserStatus } from 'src/_shared/enum/user-status.enum';
 
 const profilePictureStorage = diskStorage({
   destination: './uploads/profile-pictures',
@@ -159,6 +160,7 @@ export class UsersController {
   @Post('register')
   async register(@Body() doc: UserUpsertDto) {
     doc.role = 'user';
+    doc.status = UserStatus.PENDING;
     return this.usersService.upsert(doc);
   }
 }

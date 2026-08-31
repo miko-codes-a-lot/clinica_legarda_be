@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
 import { OperatingHour } from 'src/_shared/entities/operating-hour';
+import { UserStatus } from 'src/_shared/enum/user-status.enum';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
 
 export type UserDocument = HydratedDocument<User>;
@@ -49,6 +50,9 @@ export class User {
 
   @Prop()
   role: string;
+
+  @Prop({ enum: UserStatus, default: UserStatus.PENDING })
+  status: UserStatus;
 
   // DAILY CAPACITY
   @Prop({ default: 480 })
