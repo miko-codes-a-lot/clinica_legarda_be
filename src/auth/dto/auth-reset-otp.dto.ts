@@ -1,4 +1,14 @@
-import { IsEmail, IsNotEmpty, IsString, Matches, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  IsStrongPassword,
+  Matches,
+} from 'class-validator';
+import {
+  PASSWORD_REQUIREMENTS,
+  PASSWORD_REQUIREMENTS_MESSAGE,
+} from 'src/_shared/validation/password-policy';
 
 export class ForgotPasswordOtpDto {
   @IsEmail()
@@ -22,6 +32,8 @@ export class ResetPasswordOtpDto {
   emailAddress: string;
 
   @IsString()
-  @MinLength(8)
+  @IsStrongPassword(PASSWORD_REQUIREMENTS, {
+    message: PASSWORD_REQUIREMENTS_MESSAGE,
+  })
   newPassword: string;
 }

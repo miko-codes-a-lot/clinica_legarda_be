@@ -8,9 +8,14 @@ import {
   IsString,
   ValidateNested,
   IsEnum,
+  IsStrongPassword,
 } from 'class-validator';
 import { OperatingHourDto } from 'src/_shared/dto/operating-hour.dto';
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
+import {
+  PASSWORD_REQUIREMENTS,
+  PASSWORD_REQUIREMENTS_MESSAGE,
+} from 'src/_shared/validation/password-policy';
 
 export class UserUpsertDto {
   @IsNotEmpty()
@@ -28,6 +33,9 @@ export class UserUpsertDto {
 
   @IsOptional()
   @IsNotEmpty()
+  @IsStrongPassword(PASSWORD_REQUIREMENTS, {
+    message: PASSWORD_REQUIREMENTS_MESSAGE,
+  })
   password?: string;
 
   @IsNotEmpty()
