@@ -13,6 +13,10 @@ export class Clinic {
   @Prop()
   name: string;
 
+  // Optional so existing records need no migration before new writes are protected.
+  @Prop({ unique: true, sparse: true, select: false })
+  nameKey?: string;
+
   @Prop({ trim: true })
   address: string;
 

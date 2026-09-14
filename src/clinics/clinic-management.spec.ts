@@ -56,6 +56,21 @@ describe('Clinic management', () => {
     });
   });
 
+  it('rejects an admin update before reading or changing the clinic', async () => {
+    await expect(
+      save('admin', '000000000000000000000099'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(clinics.findById).not.toHaveBeenCalled();
+    expect(clinics.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reports a concurrent duplicate name as a business error', async () => {
+    clinics.findOneAndUpdate.mockRejectedValue({ code: 11000 });
+    await expect(save('super-admin')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   it('rejects a duplicate clinic name', async () => {
     clinics.findOne.mockResolvedValue({ name: 'Annex Clinic' });
     await expect(save('super-admin')).rejects.toBeInstanceOf(

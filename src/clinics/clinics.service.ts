@@ -46,30 +46,57 @@ export class ClinicsService {
       }
     }
     const name = doc.name.trim();
+    const nameKey = name.toLowerCase();
     const duplicate = await this.clinicModel.findOne({
-      name,
+      $or: [
+        { nameKey },
+        {
+          nameKey: { $exists: false },
+          $expr: {
+            $eq: [
+              { $toLower: { $trim: { input: { $ifNull: ['$name', ''] } } } },
+              nameKey,
+            ],
+          },
+        },
+      ],
       ...(id && { _id: { $ne: id } }),
     });
     if (duplicate)
       throw new BadRequestException(`Clinic name is already taken: "${name}"`);
 
-    const updated = await this.clinicModel.findOneAndUpdate(
-      { _id: id || new mongoose.Types.ObjectId() },
-      {
-        $set: {
-          name,
-          address: doc.address,
-          mobileNumber: doc.mobileNumber,
-          emailAddress: doc.emailAddress,
-          ...(doc.operatingHours !== undefined && {
-            operatingHours: doc.operatingHours,
-          }),
+    try {
+      const updated = await this.clinicModel.findOneAndUpdate(
+        { _id: id || new mongoose.Types.ObjectId() },
+        {
+          $set: {
+            name,
+            nameKey,
+            address: doc.address,
+            mobileNumber: doc.mobileNumber,
+            emailAddress: doc.emailAddress,
+            ...(doc.operatingHours !== undefined && {
+              operatingHours: doc.operatingHours,
+            }),
+          },
         },
-      },
-      { upsert: !id, new: true, runValidators: true },
-    );
-    if (!updated) throw new NotFoundException('Clinic not found.');
-    return updated;
+        { upsert: !id, new: true, runValidators: true },
+      );
+      if (!updated) throw new NotFoundException('Clinic not found.');
+      return updated;
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 11000
+      ) {
+        throw new BadRequestException(
+          `Clinic name is already taken: "${name}"`,
+        );
+      }
+      throw error;
+    }
   }
 
   private validateId(id: string): void {
