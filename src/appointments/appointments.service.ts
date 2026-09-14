@@ -20,9 +20,9 @@ export class AppointmentsService {
   async create(dto: AppointmentUpsertDto) {
     const request = { ...dto, services: [...new Set(dto.services ?? [])], date: calendarDay(dto.date) };
     const id = await this.scheduling.withLocks([request.dentist, request.patient], async session => {
-      await this.scheduling.validate(request, session);
+      const validated = await this.scheduling.validate(request, session);
       const [created] = await this.appointmentModel.create([
-        { ...request, history: [{ action: 'Appointment created.' }] },
+        { ...request, ...validated, history: [{ action: 'Appointment created.' }] },
       ], { session });
       return created.id as string;
     });
@@ -84,9 +84,9 @@ export class AppointmentsService {
   async update(id: string, dto: AppointmentUpsertDto) {
     await this.withExistingSchedule(id, [dto.dentist, dto.patient], async (current, session) => {
       const request = { ...dto, services: [...new Set(dto.services ?? this.scheduleRequest(current).services)], date: calendarDay(dto.date) };
-      await this.scheduling.validate(request, session, id);
+      const validated = await this.scheduling.validate(request, session, id);
       await this.appointmentModel.findByIdAndUpdate(id, {
-        $set: request,
+        $set: { ...request, ...validated },
         $push: { history: { action: 'Appointment details updated.' } },
       }, { session, runValidators: true }).exec();
     });

@@ -167,4 +167,14 @@ localTests('Appointment scheduling persistence', () => {
     })).resolves.toMatchObject({ status: 'pending' });
   });
 
+  it.each(['create', 'update'])('stores one service when %s receives ObjectId casing aliases', async operation => {
+    const treatment = await catalog.create({ name: 'Fixture aliased treatment', duration: 60 });
+    const dto = { clinic: fixture.clinic, dentist: fixture.dentist, patient: fixture.patient,
+      date, startTime: '09:00', endTime: '10:00', services: [treatment.id, treatment.id.toUpperCase()] };
+    const current = operation === 'update' ? await appointments.create({ ...dto, services: [] }) : undefined;
+    const result = current ? await service.update(current.id, dto) : await service.create(dto);
+    const saved = await appointments.findById(result.id).lean();
+    expect(saved?.services.map(clinicReferenceId)).toEqual([treatment.id]);
+  });
+
 });

@@ -41,7 +41,7 @@ export class AppointmentSchedulingService {
     });
   }
 
-  async validate(input: ScheduleRequest, session: ClientSession, excludeId?: string, statuses = OCCUPIED_STATUSES): Promise<void> {
+  async validate(input: ScheduleRequest, session: ClientSession, excludeId?: string, statuses = OCCUPIED_STATUSES): Promise<ScheduleRequest> {
     // Mongo casts equivalent uppercase IDs, but domain comparisons and catalog
     // maps use strings. Canonicalize every request reference before either step.
     const request: ScheduleRequest = {
@@ -81,5 +81,6 @@ export class AppointmentSchedulingService {
       endTime: appointment.endTime,
       serviceMinutes: duration(appointment.services.map(service => clinicReferenceId(service)).filter((id): id is string => !!id)),
     })));
+    return request;
   }
 }
