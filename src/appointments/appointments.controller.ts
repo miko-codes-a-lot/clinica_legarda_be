@@ -37,6 +37,11 @@ export class AppointmentsController {
     return this.appointmentsService.findAllByDentist(dentistId);
   }
 
+  @Get('availability/:dentistId')
+  availability(@Param('dentistId') dentistId: string) {
+    return this.appointmentsService.availability(dentistId);
+  }
+
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   findOne(@Param('id') id: string) {

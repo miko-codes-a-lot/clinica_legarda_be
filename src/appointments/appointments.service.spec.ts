@@ -3,8 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { model } from 'mongoose';
 import { AppointmentsService } from './appointments.service';
 import { Appointment, AppointmentSchema } from './entities/appointment.entity';
-import { User } from '../users/entities/user.entity';
-import { DentalCatalog } from '../dental-catalog/entities/dental-catalog.entity';
+import { AppointmentSchedulingService } from './appointment-scheduling.service';
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
 
 describe('Appointment changes', () => {
@@ -26,14 +25,20 @@ describe('Appointment changes', () => {
     update = jest.fn().mockImplementation((_id: string, payload: { $set: object; $push: { history: object } }) => {
       current.set(payload.$set);
       current.set('history', [...current.history, payload.$push.history]);
-      return { populate: () => ({ exec: async () => current }) };
+      const query = { populate: () => query, exec: async () => current };
+      return query;
     });
     const module = await Test.createTestingModule({ providers: [AppointmentsService,
       { provide: getModelToken(Appointment.name), useValue: {
-        findById: () => ({ exec: async () => current }), findOne, findByIdAndUpdate: update,
+        findById: () => {
+          const query = { session: () => query, populate: () => query, exec: async () => current };
+          return query;
+        }, findOne, findByIdAndUpdate: update,
       } },
-      { provide: getModelToken(User.name), useValue: {} },
-      { provide: getModelToken(DentalCatalog.name), useValue: {} },
+      { provide: AppointmentSchedulingService, useValue: {
+        withLocks: async (_ids: string[], work: (session: unknown) => Promise<unknown>) => work({}),
+        validate: jest.fn().mockResolvedValue(undefined),
+      } },
     ] }).compile();
     service = module.get(AppointmentsService);
   });

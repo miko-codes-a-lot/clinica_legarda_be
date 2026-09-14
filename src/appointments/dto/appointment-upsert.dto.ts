@@ -70,5 +70,5 @@ export class AppointmentUpsertDto {
   notes?: AppointmentNoteDto;
 
   @IsOptional()
-  referral: string;
+  referral?: string;
 }

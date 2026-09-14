@@ -15,6 +15,7 @@ export type UserDocument = HydratedDocument<User>;
       delete result.resetOtp;
       delete result.resetOtpExpires;
       delete result.resetOtpVerified;
+      delete result.scheduleRevision;
       return result;
     },
   },
@@ -77,6 +78,10 @@ export class User {
   // BUFFER BETWEEN APPOINTMENTS
   @Prop({ default: 15 })
   appointmentBufferMinutes: number;
+
+  // Internal cross-process scheduling lock; never returned in user responses.
+  @Prop({ select: false })
+  scheduleRevision?: number;
 
   @Prop()
   otpVerifiedAt?: Date;
