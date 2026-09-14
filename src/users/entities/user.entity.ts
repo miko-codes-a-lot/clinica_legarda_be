@@ -9,6 +9,15 @@ export type UserDocument = HydratedDocument<User>;
 @Schema({
   collection: 'users',
   timestamps: true,
+  toJSON: {
+    transform: (_doc, result: Record<string, unknown>) => {
+      delete result.password;
+      delete result.resetOtp;
+      delete result.resetOtpExpires;
+      delete result.resetOtpVerified;
+      return result;
+    },
+  },
 })
 export class User {
   _id: mongoose.Types.ObjectId;
@@ -42,6 +51,13 @@ export class User {
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: () => Clinic.name })
   clinic?: Clinic;
+
+  // Do not default to []: old documents must retain their single-clinic fallback.
+  @Prop({
+    type: [{ type: mongoose.Schema.Types.ObjectId, ref: () => Clinic.name }],
+    default: undefined,
+  })
+  clinics?: Clinic[];
 
   @Prop()
   operatingHours?: OperatingHour[];

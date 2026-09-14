@@ -3,11 +3,14 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Clinic } from './entities/clinic.entity';
 import mongoose, { Model } from 'mongoose';
 import { ClinicUpsertDto } from './dto/clinic-upsert.dto';
+import { User } from 'src/users/entities/user.entity';
+import { clinicMembershipFilter } from 'src/users/clinic-membership';
 
 @Injectable()
 export class ClinicsService {
   constructor(
     @InjectModel(Clinic.name) private readonly clinicModel: Model<Clinic>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
   async findAll() {
@@ -15,7 +18,12 @@ export class ClinicsService {
   }
 
   async findOne(id: string) {
-    return this.clinicModel.findOne({ _id: id }).populate('dentists');
+    const clinic = await this.clinicModel.findOne({ _id: id });
+    if (!clinic) return null;
+    const dentists = await this.userModel
+      .find({ role: 'dentist', ...clinicMembershipFilter(id) })
+      .populate('clinic clinics');
+    return { ...clinic.toObject(), dentists };
   }
 
   async upsert(doc: ClinicUpsertDto, id?: string) {

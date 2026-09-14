@@ -9,6 +9,7 @@ import {
   ValidateNested,
   IsEnum,
   IsStrongPassword,
+  IsIn,
 } from 'class-validator';
 import { OperatingHourDto } from 'src/_shared/dto/operating-hour.dto';
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
@@ -54,11 +55,18 @@ export class UserUpsertDto {
 
   @IsOptional()
   @IsArray()
+  @IsMongoId({ each: true })
+  clinics?: string[];
+
+  @IsOptional()
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OperatingHourDto)
   operatingHours?: OperatingHourDto[];
 
+  @IsOptional()
   @IsString()
+  @IsIn(['user', 'dentist', 'admin', 'super-admin'])
   role: string;
 
   @IsOptional()

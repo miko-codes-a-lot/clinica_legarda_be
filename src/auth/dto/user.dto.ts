@@ -3,6 +3,7 @@ export class UserDto {
   username: string;
   role: string;
   clinic?: string;
+  clinics?: string[];
   otpPending?: boolean;
   iat: number;
   exp: number;

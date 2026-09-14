@@ -30,11 +30,3 @@ export class Clinic {
 }
 
 export const ClinicSchema = SchemaFactory.createForClass(Clinic);
-
-ClinicSchema.virtual('dentists', {
-  ref: 'User',
-  localField: '_id',
-  foreignField: 'clinic',
-  match: { role: 'dentist' }, // only user that have 'dentist' role
-  justOne: false,
-});

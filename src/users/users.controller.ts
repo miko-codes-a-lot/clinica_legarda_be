@@ -23,7 +23,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { existsSync, statSync } from 'fs';
 import { Public } from 'src/auth/auth.guard';
-import { UserStatus } from 'src/_shared/enum/user-status.enum';
 
 const profilePictureStorage = diskStorage({
   destination: './uploads/profile-pictures',
@@ -139,14 +138,14 @@ export class UsersController {
 
   @HttpCode(HttpStatus.ACCEPTED)
   @Post()
-  create(@Body() doc: UserUpsertDto) {
-    return this.usersService.upsert(doc);
+  create(@Body() doc: UserUpsertDto, @User() actor: UserDto) {
+    return this.usersService.upsert(doc, undefined, actor);
   }
 
   @HttpCode(HttpStatus.OK)
   @Put(':id')
-  update(@Param('id') id: string, @Body() doc: UserUpsertDto) {
-    return this.usersService.upsert(doc, id);
+  update(@Param('id') id: string, @Body() doc: UserUpsertDto, @User() actor: UserDto) {
+    return this.usersService.upsert(doc, id, actor);
   }
 
   @HttpCode(HttpStatus.OK)
@@ -159,8 +158,6 @@ export class UsersController {
   @HttpCode(HttpStatus.CREATED)
   @Post('register')
   async register(@Body() doc: UserUpsertDto) {
-    doc.role = 'user';
-    doc.status = UserStatus.PENDING;
-    return this.usersService.upsert(doc);
+    return this.usersService.registerPatient(doc);
   }
 }

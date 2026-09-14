@@ -24,7 +24,7 @@ export class AuthService {
   }
 
   async signIn(username: string, password: string) {
-    const user = await this.userService.findByOneUsername(username);
+    const user = await this.userService.findForSignIn(username);
     if (!user)
       throw new BadRequestException('Username or password is incorrect');
 

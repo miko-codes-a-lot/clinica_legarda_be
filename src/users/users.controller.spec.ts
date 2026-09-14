@@ -5,10 +5,11 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 describe('UsersController', () => {
-  it('registers a public user with pending status', async () => {
-    const usersService = {
-      upsert: async (doc: UserUpsertDto) => ({ ...doc }),
-    } as UsersService;
+  it('routes public registration through the restricted patient write path', async () => {
+    const registerPatient = jest
+      .fn()
+      .mockResolvedValue({ role: 'user', status: UserStatus.PENDING });
+    const usersService = { registerPatient } as unknown as UsersService;
     const controller = new UsersController(usersService);
     const registration = Object.assign(new UserUpsertDto(), {
       firstName: 'Jamie',
@@ -23,6 +24,7 @@ describe('UsersController', () => {
 
     const registered = await controller.register(registration);
 
+    expect(registerPatient).toHaveBeenCalledWith(registration);
     expect(registered).toMatchObject({
       role: 'user',
       status: UserStatus.PENDING,
