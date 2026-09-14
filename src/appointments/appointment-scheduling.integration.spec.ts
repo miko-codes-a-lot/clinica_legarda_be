@@ -1,3 +1,4 @@
+import { Referral, ReferralSchema } from '../referral/entities/referral.entity';
 import { clinicReferenceId } from '../users/clinic-membership';
 import { BadRequestException } from '@nestjs/common';
 import { Connection, createConnection, Model } from 'mongoose';
@@ -21,12 +22,13 @@ localTests('Appointment scheduling persistence', () => {
   let catalog: Model<DentalCatalog>;
   let service: AppointmentsService;
   let fixture: { dentist: string; patient: string; otherPatient: string; clinic: string; otherClinic: string };
+  const actor = { sub: '64b000000000000000000099', role: 'admin' };
   const hours = [{ day: 'monday', startTime: '08:00', endTime: '18:00' }];
   const date = new Date('2026-09-21T00:00:00.000Z');
 
   beforeAll(async () => {
-    if (!uri || !/^mongodb:\/\/127\.0\.0\.1:27028\/clinica_test_ticket04\?replicaSet=clinica-test$/.test(uri)) {
-      throw new Error('Use only the isolated local clinica_test_ticket04 database.');
+    if (!uri || !/^mongodb:\/\/127\.0\.0\.1:27028\/clinica_test_ticket05\?replicaSet=clinica-test$/.test(uri)) {
+      throw new Error('Use only the isolated local clinica_test_ticket05 database.');
     }
     connection = await createConnection(uri).asPromise();
     appointments = connection.model(Appointment.name, AppointmentSchema);
@@ -36,13 +38,13 @@ localTests('Appointment scheduling persistence', () => {
     await appointments.init();
     await users.init();
     await clinics.init();
-    service = new AppointmentsService(appointments, new AppointmentSchedulingService(appointments, users, clinics, catalog));
+    service = new AppointmentsService(appointments, new AppointmentSchedulingService(appointments, users, clinics, catalog), connection.model(Referral.name, ReferralSchema));
     competingConnection = await createConnection(uri).asPromise();
     const otherAppointments = competingConnection.model(Appointment.name, AppointmentSchema);
     competingService = new AppointmentsService(otherAppointments, new AppointmentSchedulingService(
       otherAppointments, competingConnection.model(User.name, UserSchema),
       competingConnection.model(Clinic.name, ClinicSchema), competingConnection.model(DentalCatalog.name, DentalCatalogSchema),
-    ));
+    ), competingConnection.model(Referral.name, ReferralSchema));
   });
   beforeEach(async () => {
     await appointments.deleteMany({});
@@ -64,7 +66,7 @@ localTests('Appointment scheduling persistence', () => {
       { ...fixture, date, startTime: '09:00', endTime: '10:00', status: 'pending' },
       { ...fixture, patient: fixture.otherPatient, clinic: fixture.otherClinic, date, startTime: secondStart, endTime: secondStart === '09:00' ? '10:00' : '10:30', status: 'pending' },
     ]);
-    const results = await Promise.allSettled([service.approve(requests[0].id), competingService.approve(requests[1].id)]);
+    const results = await Promise.allSettled([service.approve(requests[0].id, actor), competingService.approve(requests[1].id, actor)]);
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     const failed = results.find(r => r.status === 'rejected');
     expect(failed?.status === 'rejected' && failed.reason).toBeInstanceOf(BadRequestException);
@@ -88,7 +90,7 @@ localTests('Appointment scheduling persistence', () => {
     const result = await service.reschedule(current.id, {
       date, startTime: '09:00', endTime: '10:00', patient: fixture.otherPatient,
       dentist: fixture.otherPatient, reason: '  Correct calendar  ',
-    });
+    }, actor);
     expect(result.patient._id.toString()).toBe(fixture.patient);
     expect(result.dentist._id.toString()).toBe(fixture.dentist);
     expect(result.status).toBe('pending');
@@ -99,16 +101,16 @@ localTests('Appointment scheduling persistence', () => {
   it('rejects same calendar-day conflicts and revoked membership on new writes', async () => {
     await appointments.create({ ...fixture, date: new Date('2026-09-21T12:00:00Z'), startTime: '09:00', endTime: '10:00', status: 'confirmed' });
     const dto = { ...fixture, clinic: fixture.otherClinic, patient: fixture.otherPatient, date, startTime: '09:30', endTime: '10:30', referral: '' };
-    await expect(service.create(dto)).rejects.toThrow('Dentist already');
+    await expect(service.create(dto, actor)).rejects.toThrow('Dentist already');
     await users.updateOne({ _id: fixture.dentist }, { $set: { clinics: [] } });
-    await expect(service.create({ ...dto, startTime: '11:00', endTime: '12:00' })).rejects.toThrow('not assigned');
+    await expect(service.create({ ...dto, startTime: '11:00', endTime: '12:00' }, actor)).rejects.toThrow('not assigned');
   });
 
   it('serializes simultaneous creates for a patient across different dentists', async () => {
     const other = await users.create({ role: 'dentist', status: 'confirmed', clinics: [fixture.clinic], operatingHours: hours });
     const dto = { clinic: fixture.clinic, patient: fixture.patient, dentist: fixture.dentist, date, startTime: '09:00', endTime: '10:00', referral: undefined };
     const results = await Promise.allSettled([
-      service.create(dto), competingService.create({ ...dto, dentist: other.id, startTime: '09:30', endTime: '10:30' }),
+      service.create(dto, actor), competingService.create({ ...dto, dentist: other.id, startTime: '09:30', endTime: '10:30' }, actor),
     ]);
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     expect(await appointments.countDocuments()).toBe(1);
@@ -120,7 +122,7 @@ localTests('Appointment scheduling persistence', () => {
     const result = await service.update(current.id, {
       clinic: fixture.otherClinic, patient: fixture.patient, dentist: fixture.dentist,
       date, startTime: '09:00', endTime: '10:00', referral: undefined,
-    });
+    }, actor);
     expect(clinicReferenceId(result.clinic)).toBe(fixture.otherClinic);
     const after = await users.findById(fixture.dentist).lean();
     expect(after?.['updatedAt']).toEqual(before?.['updatedAt']);
@@ -132,9 +134,9 @@ localTests('Appointment scheduling persistence', () => {
     const treatment = await catalog.create({ name: 'Fixture treatment', duration: 90 });
     const dto = { clinic: fixture.clinic, dentist: fixture.dentist, patient: fixture.patient,
       date, startTime: '09:00', endTime: '10:00', services: [treatment.id] };
-    await expect(service.create(dto)).rejects.toThrow('cover the selected services');
-    await expect(service.create({ ...dto, endTime: '10:30' })).resolves.toMatchObject({ status: 'pending' });
-    await expect(service.create({ ...dto, clinic: fixture.otherClinic, startTime: '10:45', endTime: '12:15' })).resolves.toMatchObject({ status: 'pending' });
+    await expect(service.create(dto, actor)).rejects.toThrow('cover the selected services');
+    await expect(service.create({ ...dto, endTime: '10:30' }, actor)).resolves.toMatchObject({ status: 'pending' });
+    await expect(service.create({ ...dto, clinic: fixture.otherClinic, startTime: '10:45', endTime: '12:15' }, actor)).resolves.toMatchObject({ status: 'pending' });
     expect(await appointments.countDocuments()).toBe(2);
   });
 
@@ -146,7 +148,7 @@ localTests('Appointment scheduling persistence', () => {
       dentist: identity === 'dentist' ? fixture.dentist.toUpperCase() : otherDentist.id,
       patient: identity === 'patient' ? fixture.patient.toUpperCase() : fixture.otherPatient,
     };
-    await expect(service.create(dto)).rejects.toThrow(identity === 'dentist' ? 'Dentist already' : 'Patient already');
+    await expect(service.create(dto, actor)).rejects.toThrow(identity === 'dentist' ? 'Dentist already' : 'Patient already');
     expect(await appointments.countDocuments()).toBe(1);
   });
 
@@ -156,7 +158,7 @@ localTests('Appointment scheduling persistence', () => {
     await expect(service.create({
       clinic: fixture.clinic, dentist: fixture.dentist.toUpperCase(), patient: fixture.otherPatient,
       date, startTime: '11:00', endTime: '12:00',
-    })).rejects.toThrow('remaining working time');
+    }, actor)).rejects.toThrow('remaining working time');
   });
 
   it('accepts equivalent uppercase clinic, participant, and service IDs for an available slot', async () => {
@@ -164,7 +166,7 @@ localTests('Appointment scheduling persistence', () => {
     await expect(service.create({
       clinic: fixture.clinic.toUpperCase(), dentist: fixture.dentist.toUpperCase(), patient: fixture.patient.toUpperCase(),
       services: [treatment.id.toUpperCase()], date, startTime: '09:00', endTime: '10:00',
-    })).resolves.toMatchObject({ status: 'pending' });
+    }, actor)).resolves.toMatchObject({ status: 'pending' });
   });
 
   it.each(['create', 'update'])('stores one service when %s receives ObjectId casing aliases', async operation => {
@@ -172,7 +174,7 @@ localTests('Appointment scheduling persistence', () => {
     const dto = { clinic: fixture.clinic, dentist: fixture.dentist, patient: fixture.patient,
       date, startTime: '09:00', endTime: '10:00', services: [treatment.id, treatment.id.toUpperCase()] };
     const current = operation === 'update' ? await appointments.create({ ...dto, services: [] }) : undefined;
-    const result = current ? await service.update(current.id, dto) : await service.create(dto);
+    const result = current ? await service.update(current.id, dto, actor) : await service.create(dto, actor);
     const saved = await appointments.findById(result.id).lean();
     expect(saved?.services.map(clinicReferenceId)).toEqual([treatment.id]);
   });

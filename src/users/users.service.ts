@@ -12,6 +12,12 @@ import * as bcrypt from 'bcrypt';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
 import { assignedClinicIds, clinicReferenceId } from './clinic-membership';
 import { isAdmin, UserActor } from 'src/auth/role-policy';
+import { Appointment } from '../appointments/entities/appointment.entity';
+import { referenceId, sameId } from '../auth/record-policy';
+import {
+  DENTIST_DIRECTORY_FIELDS,
+  PATIENT_DIRECTORY_FIELDS,
+} from './user-projections';
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
 
 @Injectable()
@@ -19,6 +25,8 @@ export class UsersService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Clinic.name) private readonly clinicModel: Model<Clinic>,
+    @InjectModel(Appointment.name)
+    private readonly appointmentModel: Model<Appointment>,
   ) {}
 
   findByOneUsername(username: string) {
@@ -35,37 +43,105 @@ export class UsersService {
       .select('+password +resetOtp +resetOtpExpires +resetOtpVerified');
   }
 
-  findAll(role?: string) {
+  findAll(actor: UserActor) {
+    if (!isAdmin(actor))
+      throw new ForbiddenException(
+        'Only administrators may access the user directory.',
+      );
+    return this.userModel.find().populate('clinic clinics');
+  }
+
+  dentistDirectory(actor: UserActor) {
+    if (!actor?.sub) throw new ForbiddenException('Authentication required.');
     return this.userModel
-      .find({
-        ...(role && { role }),
-      })
+      .find({ role: 'dentist', status: UserStatus.CONFIRMED })
+      .select(DENTIST_DIRECTORY_FIELDS)
       .populate('clinic clinics');
   }
 
-  findOne(id: string) {
-    return this.userModel.findOne({ _id: id }).populate('clinic clinics');
+  async patientDirectory(actor: UserActor) {
+    if (!isAdmin(actor) && actor?.role !== 'dentist')
+      throw new ForbiddenException('You cannot access the patient directory.');
+    const patientIds = isAdmin(actor)
+      ? undefined
+      : await this.appointmentModel.distinct('patient', {
+          dentist: referenceId(actor.sub),
+        });
+    return this.userModel
+      .find({ role: 'user', ...(patientIds && { _id: { $in: patientIds } }) })
+      .select(PATIENT_DIRECTORY_FIELDS);
   }
 
-  async updateProfilePicture(id: string, fileName: string) {
-    const updatedUser = await this.userModel.findByIdAndUpdate(
+  /** Trusted recipient lookup, deliberately unavailable as a directory route. */
+  notificationStaffRecipients() {
+    return this.userModel
+      .find({ role: { $in: ['admin', 'super-admin'] } })
+      .select('_id role');
+  }
+
+  findForAuthentication(id: string) {
+    return this.userModel.findById(referenceId(id)).populate('clinic clinics');
+  }
+
+  async findOne(id: string, actor: UserActor) {
+    const user = await this.userModel
+      .findById(referenceId(id))
+      .populate('clinic clinics');
+    if (!user) throw new NotFoundException('User not found.');
+    await this.authorizeProfile(user, actor);
+    return user;
+  }
+
+  async pictureProfile(id: string, actor: UserActor) {
+    if (!actor?.sub) throw new ForbiddenException('Authentication required.');
+    const user = await this.userModel
+      .findById(referenceId(id))
+      .select('_id role status profilePicture');
+    if (!user) throw new NotFoundException('User not found.');
+    if (!(user.role === 'dentist' && user.status === UserStatus.CONFIRMED))
+      await this.authorizeProfile(user, actor);
+    return user;
+  }
+
+  private async authorizeProfile(user: User, actor: UserActor) {
+    if (isAdmin(actor) || (actor?.sub && sameId(actor.sub, user._id))) return;
+    if (
+      actor?.role === 'dentist' &&
+      user.role === 'user' &&
+      (await this.appointmentModel.exists({
+        dentist: referenceId(actor.sub),
+        patient: user._id,
+      }))
+    )
+      return;
+    throw new ForbiddenException('You cannot access this profile.');
+  }
+
+  async authorizePictureWrite(id: string, actor: UserActor) {
+    if (!actor || (!isAdmin(actor) && !sameId(actor.sub, id)))
+      throw new ForbiddenException('You cannot change this picture.');
+    const existing = await this.userModel.findById(referenceId(id));
+    if (!existing) throw new NotFoundException('User not found.');
+    if (existing.role === 'super-admin' && actor.role !== 'super-admin')
+      throw new ForbiddenException(
+        'Only super administrators may manage super administrators.',
+      );
+  }
+
+  async updateProfilePicture(id: string, fileName: string, actor: UserActor) {
+    await this.authorizePictureWrite(id, actor);
+    return this.userModel.findByIdAndUpdate(
       id,
       { profilePicture: fileName },
       { new: true, runValidators: true },
     );
-
-    if (!updatedUser) {
-      throw new BadRequestException(`User with ID "${id}" not found.`);
-    }
-
-    return updatedUser;
   }
 
   async upsert(doc: UserUpsertDto, id?: string, actor?: UserActor) {
     if (
       !actor ||
       (!id && !isAdmin(actor)) ||
-      (id && !isAdmin(actor) && actor.sub !== id)
+      (id && !isAdmin(actor) && !sameId(actor.sub, id))
     ) {
       throw new ForbiddenException('You cannot manage this user.');
     }
@@ -84,7 +160,7 @@ export class UsersService {
         (doc.role !== undefined && doc.role !== existing.role) ||
         (doc.status !== undefined && doc.status !== existing.status) ||
         (doc.clinic !== undefined &&
-          clinicReferenceId(doc.clinic) !== assigned[0]) ||
+          referenceId(doc.clinic) !== assigned[0]?.toLowerCase()) ||
         (requested !== undefined &&
           (requested.length !== assigned.length ||
             requested.some((id) => !assigned.includes(id))))
@@ -225,7 +301,10 @@ export class UsersService {
       .populate('clinic clinics');
   }
 
-  async delete(id: string) {
+  async delete(id: string, actor: UserActor) {
+    if (!isAdmin(actor))
+      throw new ForbiddenException('Only administrators may delete users.');
+    referenceId(id);
     const user = await this.userModel.findById(id);
 
     if (!user) {

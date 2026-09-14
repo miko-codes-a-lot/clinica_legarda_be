@@ -1,3 +1,5 @@
+import { User } from '../_shared/decorators/user.decorator';
+import { UserActor } from '../auth/role-policy';
 import {
   Controller,
   Get,
@@ -21,20 +23,31 @@ export class AppointmentsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() createAppointmentDto: AppointmentUpsertDto) {
-    return this.appointmentsService.create(createAppointmentDto);
+  create(
+    @Body() createAppointmentDto: AppointmentUpsertDto,
+    @User() actor: UserActor,
+  ) {
+    return this.appointmentsService.create(createAppointmentDto, actor);
   }
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  findAll(@Query('patient') patient?: string) {
-    return this.appointmentsService.findAll(patient);
+  findAll(
+    @User() actor: UserActor,
+    @Query('patient') patient?: string,
+    @Query('clinic') clinic?: string,
+  ) {
+    return this.appointmentsService.findAll(actor, patient, clinic);
   }
 
   @Get('by-dentist/:dentistId')
   @HttpCode(HttpStatus.OK)
-  findAllByDentist(@Param('dentistId') dentistId?: string) {
-    return this.appointmentsService.findAllByDentist(dentistId);
+  findAllByDentist(
+    @Param('dentistId') dentistId: string,
+    @User() actor: UserActor,
+    @Query('clinic') clinic?: string,
+  ) {
+    return this.appointmentsService.findAllByDentist(actor, dentistId, clinic);
   }
 
   @Get('availability/:dentistId')
@@ -44,8 +57,8 @@ export class AppointmentsController {
 
   @Get(':id')
   @HttpCode(HttpStatus.OK)
-  findOne(@Param('id') id: string) {
-    return this.appointmentsService.findOne(id);
+  findOne(@Param('id') id: string, @User() actor: UserActor) {
+    return this.appointmentsService.findOne(id, actor);
   }
 
   @Put(':id')
@@ -53,26 +66,31 @@ export class AppointmentsController {
   update(
     @Param('id') id: string,
     @Body() updateAppointmentDto: AppointmentUpsertDto,
+    @User() actor: UserActor,
   ) {
-    return this.appointmentsService.update(id, updateAppointmentDto);
+    return this.appointmentsService.update(id, updateAppointmentDto, actor);
   }
 
   @Patch(':id/approve')
   @HttpCode(HttpStatus.OK)
-  approve(@Param('id') id: string) {
-    return this.appointmentsService.approve(id);
+  approve(@Param('id') id: string, @User() actor: UserActor) {
+    return this.appointmentsService.approve(id, actor);
   }
 
   @Patch(':id/reject')
   @HttpCode(HttpStatus.OK)
-  reject(@Param('id') id: string) {
-    return this.appointmentsService.reject(id);
+  reject(@Param('id') id: string, @User() actor: UserActor) {
+    return this.appointmentsService.reject(id, actor);
   }
 
   @Patch(':id/cancel')
   @HttpCode(HttpStatus.OK)
-  cancel(@Param('id') id: string, @Body() dto: AppointmentChangeReasonDto) {
-    return this.appointmentsService.cancel(id, dto.reason);
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: AppointmentChangeReasonDto,
+    @User() actor: UserActor,
+  ) {
+    return this.appointmentsService.cancel(id, actor, dto.reason);
   }
 
   @Patch(':id/reschedule')
@@ -80,16 +98,18 @@ export class AppointmentsController {
   reschedule(
     @Param('id') id: string,
     @Body() rescheduleDto: RescheduleAppointmentDto,
+    @User() actor: UserActor,
   ) {
-    return this.appointmentsService.reschedule(id, rescheduleDto);
+    return this.appointmentsService.reschedule(id, rescheduleDto, actor);
   }
 
   @Patch(':id/notes')
   @HttpCode(HttpStatus.OK)
   updateDentistNotes(
     @Param('id') id: string,
-    @Body('clinicNotes') clinicNotes: string
+    @Body('clinicNotes') clinicNotes: string,
+    @User() actor: UserActor,
   ) {
-    return this.appointmentsService.updateDentistNotes(id, clinicNotes);
+    return this.appointmentsService.updateDentistNotes(id, clinicNotes, actor);
   }
 }

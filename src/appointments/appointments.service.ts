@@ -1,190 +1,528 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { ReferralStatus } from '../_shared/enum/referral-status.enum';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
-import { Appointment, AppointmentDocument } from './entities/appointment.entity';
+import {
+  Appointment,
+  AppointmentDocument,
+} from './entities/appointment.entity';
 import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 import { AppointmentAvailabilityDto } from './dto/appointment-availability.dto';
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
 import { clinicReferenceId } from '../users/clinic-membership';
-import { AppointmentSchedulingService, OCCUPIED_STATUSES } from './appointment-scheduling.service';
+import {
+  AppointmentSchedulingService,
+  OCCUPIED_STATUSES,
+} from './appointment-scheduling.service';
+import { Referral } from '../referral/entities/referral.entity';
+import { isAdmin, UserActor } from '../auth/role-policy';
+import {
+  appointmentScope,
+  authorizeAppointment,
+  referenceId,
+  sameId,
+} from '../auth/record-policy';
+import {
+  APPOINTMENT_PERSON_FIELDS,
+  DENTIST_DIRECTORY_FIELDS,
+} from '../users/user-projections';
 import { calendarDay, ScheduleRequest } from './appointment-scheduling.rules';
 
 @Injectable()
 export class AppointmentsService {
   constructor(
-    @InjectModel(Appointment.name) private readonly appointmentModel: Model<Appointment>,
+    @InjectModel(Appointment.name)
+    private readonly appointmentModel: Model<Appointment>,
     private readonly scheduling: AppointmentSchedulingService,
+    @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
   ) {}
 
-  async create(dto: AppointmentUpsertDto) {
-    const request = { ...dto, services: [...new Set(dto.services ?? [])], date: calendarDay(dto.date) };
-    const id = await this.scheduling.withLocks([request.dentist, request.patient], async session => {
-      const validated = await this.scheduling.validate(request, session);
-      const [created] = await this.appointmentModel.create([
-        { ...request, ...validated, history: [{ action: 'Appointment created.' }] },
-      ], { session });
-      return created.id as string;
-    });
-    return this.findOne(id);
+  async create(dto: AppointmentUpsertDto, actor: UserActor) {
+    authorizeAppointment(actor, dto);
+    if (
+      actor.role === 'dentist' &&
+      !(await this.appointmentModel.exists({
+        dentist: referenceId(actor.sub),
+        patient: referenceId(dto.patient),
+      }))
+    ) {
+      throw new ForbiddenException(
+        'Dentists may book only their established patients.',
+      );
+    }
+    const request = this.writeFields(dto, actor);
+    const id = await this.scheduling.withLocks(
+      [request.dentist, request.patient],
+      async (session) => {
+        const validated = await this.scheduling.validate(request, session);
+        const referral = await this.validateReferral(
+          dto.referral,
+          validated.patient,
+          actor,
+          session,
+        );
+        const [created] = await this.appointmentModel.create(
+          [
+            {
+              ...request,
+              ...validated,
+              ...(referral && { referral }),
+              status: AppointmentStatus.PENDING,
+              history: [{ action: 'Appointment created.' }],
+            },
+          ],
+          { session },
+        );
+        return created.id as string;
+      },
+    );
+    return this.findOne(id, actor);
   }
 
   async availability(dentistId: string): Promise<AppointmentAvailabilityDto[]> {
-    if (!Types.ObjectId.isValid(dentistId)) throw new BadRequestException('Invalid dentist ID');
-    const appointments = await this.appointmentModel.find({
-      dentist: dentistId, status: { $in: OCCUPIED_STATUSES },
-    }).select('_id date startTime endTime status').lean().exec();
-    return appointments.map(appointment => ({
-      _id: appointment._id.toString(), date: appointment.date,
-      startTime: appointment.startTime, endTime: appointment.endTime,
+    if (!Types.ObjectId.isValid(dentistId))
+      throw new BadRequestException('Invalid dentist ID');
+    const appointments = await this.appointmentModel
+      .find({
+        dentist: dentistId,
+        status: { $in: OCCUPIED_STATUSES },
+      })
+      .select('_id date startTime endTime status')
+      .lean()
+      .exec();
+    return appointments.map((appointment) => ({
+      _id: appointment._id.toString(),
+      date: appointment.date,
+      startTime: appointment.startTime,
+      endTime: appointment.endTime,
       status: appointment.status,
     }));
   }
 
-  findAll(patient?: string) {
-    const filter = patient ? { patient } : {};
-
-    return this.appointmentModel
-      .find(filter)
-      .populate('clinic patient dentist services referral')
-      .populate({
-        path: 'referral.fromClinicId', // populate the referral's source clinic
-        model: 'clinic'
-      })
-      .exec();
+  findAll(actor: UserActor, patient?: string, clinic?: string) {
+    return this.populate(
+      this.appointmentModel.find({
+        $and: [
+          appointmentScope(actor),
+          patient ? { patient: referenceId(patient) } : {},
+          clinic ? { clinic: referenceId(clinic) } : {},
+        ],
+      }),
+    ).exec();
   }
 
-  findAllByDentist(dentist?: string) {
-    const filter = dentist ? { dentist } : {};
-    return this.appointmentModel
-      .find(filter)
-      .populate('clinic patient dentist services referral')
-      .exec();
+  findAllByDentist(actor: UserActor, dentist: string, clinic?: string) {
+    return this.populate(
+      this.appointmentModel.find({
+        $and: [
+          appointmentScope(actor),
+          { dentist: referenceId(dentist) },
+          clinic ? { clinic: referenceId(clinic) } : {},
+        ],
+      }),
+    ).exec();
   }
 
-  async findOne(id: string) {
-    const appointment = await this.appointmentModel
-      .findById(id)
-      .populate('clinic patient dentist services referral')
-      .populate({
-        path: 'referral', // the field in appointment
-        populate: [
-          { path: 'fromClinicId' },  // populate referral.fromClinicId
-          { path: 'fromDoctorId' }   // populate referral.fromDoctorId
-        ]
-      })
-      .exec();
-
-    if (!appointment) {
-      throw new NotFoundException(`Appointment with ID "${id}" not found.`);
-    }
+  async findOne(id: string, actor: UserActor) {
+    const appointment = await this.populate(
+      this.appointmentModel.findById(referenceId(id)),
+    ).exec();
+    if (!appointment) throw new NotFoundException('Appointment not found.');
+    authorizeAppointment(actor, appointment);
     return appointment;
   }
 
-  async update(id: string, dto: AppointmentUpsertDto) {
-    await this.withExistingSchedule(id, [dto.dentist, dto.patient], async (current, session) => {
-      const request = { ...dto, services: [...new Set(dto.services ?? this.scheduleRequest(current).services)], date: calendarDay(dto.date) };
-      const validated = await this.scheduling.validate(request, session, id);
-      await this.appointmentModel.findByIdAndUpdate(id, {
-        $set: { ...request, ...validated },
-        $push: { history: { action: 'Appointment details updated.' } },
-      }, { session, runValidators: true }).exec();
-    });
-    return this.findOne(id);
+  private populate<
+    T extends {
+      populate: (options: import('mongoose').PopulateOptions[]) => T;
+    },
+  >(query: T): T {
+    return query.populate([
+      { path: 'clinic' },
+      { path: 'services' },
+      { path: 'patient', select: APPOINTMENT_PERSON_FIELDS },
+      { path: 'dentist', select: DENTIST_DIRECTORY_FIELDS },
+      {
+        path: 'referral',
+        select: '_id fromDoctorId fromClinicId reason reasonOfDecline status',
+        populate: [
+          { path: 'fromDoctorId', select: APPOINTMENT_PERSON_FIELDS },
+          { path: 'fromClinicId' },
+        ],
+      },
+    ]);
   }
 
-  approve(id: string) {
-    return this.updateStatus(id, AppointmentStatus.CONFIRMED, 'Appointment approved.');
+  async update(id: string, dto: AppointmentUpsertDto, actor: UserActor) {
+    await this.withExistingSchedule(
+      id,
+      actor,
+      [dto.dentist, dto.patient],
+      async (current, session) => {
+        if (
+          !isAdmin(actor) &&
+          (!sameId(dto.patient, current.patient) ||
+            !sameId(dto.dentist, current.dentist) ||
+            !sameId(dto.clinic, current.clinic))
+        ) {
+          throw new ForbiddenException(
+            'Only administrators may change appointment identities.',
+          );
+        }
+        const request = this.writeFields(dto, actor, current);
+        const referral = await this.validateReferral(
+          dto.referral === undefined
+            ? current.referral?.toString()
+            : dto.referral,
+          request.patient,
+          actor,
+          session,
+          id,
+        );
+        const validated = await this.scheduling.validate(request, session, id);
+        await this.appointmentModel
+          .findByIdAndUpdate(
+            id,
+            {
+              $set: { ...request, ...validated, referral: referral || null },
+              $push: { history: { action: 'Appointment details updated.' } },
+            },
+            { session, runValidators: true },
+          )
+          .exec();
+      },
+    );
+    return this.findOne(id, actor);
   }
 
-  reject(id: string) {
-    return this.updateStatus(id, AppointmentStatus.REJECTED, 'Appointment rejected.');
+  approve(id: string, actor: UserActor) {
+    return this.updateStatus(
+      id,
+      AppointmentStatus.CONFIRMED,
+      'Appointment approved.',
+      actor,
+    );
   }
 
-  cancel(id: string, reason?: string) {
-    return this.updateStatus(id, AppointmentStatus.CANCELLED, 'Appointment cancelled.', reason);
+  reject(id: string, actor: UserActor) {
+    return this.updateStatus(
+      id,
+      AppointmentStatus.REJECTED,
+      'Appointment rejected.',
+      actor,
+    );
   }
 
-  async reschedule(id: string, dto: RescheduleAppointmentDto) {
-    await this.withExistingSchedule(id, [], async (current, session) => {
+  cancel(id: string, actor: UserActor, reason?: string) {
+    return this.updateStatus(
+      id,
+      AppointmentStatus.CANCELLED,
+      'Appointment cancelled.',
+      actor,
+      reason,
+    );
+  }
+
+  async reschedule(
+    id: string,
+    dto: RescheduleAppointmentDto,
+    actor: UserActor,
+  ) {
+    await this.withExistingSchedule(id, actor, [], async (current, session) => {
       const request = {
-        ...this.scheduleRequest(current), date: calendarDay(dto.date),
-        startTime: dto.startTime, endTime: dto.endTime,
+        ...this.scheduleRequest(current),
+        date: calendarDay(dto.date),
+        startTime: dto.startTime,
+        endTime: dto.endTime,
       };
       await this.scheduling.validate(request, session, id);
-      await this.appointmentModel.findByIdAndUpdate(id, {
-        $set: { date: request.date, startTime: request.startTime, endTime: request.endTime, status: AppointmentStatus.PENDING },
-        $push: { history: { action: 'Appointment rescheduled.', reason: dto.reason?.trim() } },
-      }, { session, runValidators: true }).exec();
+      await this.appointmentModel
+        .findByIdAndUpdate(
+          id,
+          {
+            $set: {
+              date: request.date,
+              startTime: request.startTime,
+              endTime: request.endTime,
+              status: AppointmentStatus.PENDING,
+            },
+            $push: {
+              history: {
+                action: 'Appointment rescheduled.',
+                reason: dto.reason?.trim(),
+              },
+            },
+          },
+          { session, runValidators: true },
+        )
+        .exec();
     });
-    return this.findOne(id);
+    return this.findOne(id, actor);
   }
 
-  async updateDentistNotes(
-    id: string,
-    dentistNotes: string
+  async updateDentistNotes(id: string, dentistNotes: string, actor: UserActor) {
+    if (typeof dentistNotes !== 'string')
+      throw new BadRequestException('Clinical notes must be text.');
+    await this.withExistingSchedule(id, actor, [], async (current, session) => {
+      authorizeAppointment(actor, current, true);
+      await this.appointmentModel
+        .findByIdAndUpdate(
+          id,
+          {
+            $set: { 'notes.clinicNotes': dentistNotes },
+            $push: { history: { action: 'Dentist added notes.' } },
+          },
+          { session, runValidators: true },
+        )
+        .exec();
+    });
+    return this.findOne(id, actor);
+  }
+
+  /** Narrow referral outcome operation; source dentists receive no general appointment access. */
+  async rejectLinkedReferral(
+    referralId: string,
+    actor: UserActor,
+    reasonOfDecline: string,
   ) {
-    const updatedAppointment = await this.appointmentModel
-      .findByIdAndUpdate(
-        id,
-        { 
-          $set: { 'notes.clinicNotes': dentistNotes },
-          $push: { history: { action: 'Dentist added notes.' } }
-        },
-        { new: true }
-      )
-      .populate('clinic patient dentist services')
+    const referral = await this.referralModel
+      .findById(referenceId(referralId))
       .exec();
-    if (!updatedAppointment) {
-      throw new NotFoundException(`Appointment with ID "${id}" not found.`);
+    if (!referral) throw new NotFoundException('Referral not found.');
+    const appointment = await this.appointmentModel
+      .findOne({ referral: referral._id })
+      .exec();
+    if (
+      !isAdmin(actor) &&
+      !(
+        actor?.role === 'dentist' &&
+        (sameId(actor.sub, referral.fromDoctorId) ||
+          (appointment && sameId(actor.sub, appointment.dentist)))
+      )
+    )
+      throw new ForbiddenException('You cannot decide this referral.');
+    const rejectReferral = (session: ClientSession) =>
+      this.referralModel
+        .findByIdAndUpdate(
+          referralId,
+          {
+            $set: { status: ReferralStatus.REJECTED, reasonOfDecline },
+          },
+          { session, runValidators: true },
+        )
+        .exec();
+    if (!appointment) {
+      await this.scheduling.withLocks(
+        referral.patient ? [referenceId(referral.patient)] : [],
+        async (session) => {
+          if (
+            await this.appointmentModel
+              .exists({ referral: referral._id })
+              .session(session)
+          )
+            throw new ConflictException(
+              'Referral link changed. Reload and try again.',
+            );
+          await rejectReferral(session);
+        },
+      );
+      return;
     }
-
-    return updatedAppointment;
+    await this.withExistingSchedule(
+      appointment.id,
+      actor,
+      [],
+      async (current, session) => {
+        if (!current.referral || !sameId(current.referral, referralId))
+          throw new ConflictException('Referral link changed.');
+        await this.appointmentModel
+          .findByIdAndUpdate(
+            current._id,
+            {
+              $set: { status: AppointmentStatus.REJECTED },
+              $push: { history: { action: 'Appointment rejected.' } },
+            },
+            { session, runValidators: true },
+          )
+          .exec();
+        await rejectReferral(session);
+      },
+      referral,
+    );
   }
 
-
-  private async updateStatus(id: string, status: AppointmentStatus, historyAction: string, reason?: string) {
-    await this.withExistingSchedule(id, [], async (current, session) => {
+  private async updateStatus(
+    id: string,
+    status: AppointmentStatus,
+    historyAction: string,
+    actor: UserActor,
+    reason?: string,
+  ) {
+    await this.withExistingSchedule(id, actor, [], async (current, session) => {
+      authorizeAppointment(
+        actor,
+        current,
+        status !== AppointmentStatus.CANCELLED,
+      );
       if (status === AppointmentStatus.CONFIRMED) {
-        await this.scheduling.validate(this.scheduleRequest(current), session, id, [AppointmentStatus.CONFIRMED]);
+        await this.scheduling.validate(
+          this.scheduleRequest(current),
+          session,
+          id,
+          [AppointmentStatus.CONFIRMED],
+        );
       }
-      await this.appointmentModel.findByIdAndUpdate(id, {
-        $set: { status },
-        $push: { history: { action: historyAction, reason: reason?.trim() } },
-      }, { session, runValidators: true }).exec();
+      await this.appointmentModel
+        .findByIdAndUpdate(
+          id,
+          {
+            $set: { status },
+            $push: {
+              history: { action: historyAction, reason: reason?.trim() },
+            },
+          },
+          { session, runValidators: true },
+        )
+        .exec();
     });
-    return this.findOne(id);
+    return this.findOne(id, actor);
+  }
+
+  private writeFields(
+    dto: AppointmentUpsertDto,
+    actor: UserActor,
+    current?: Appointment,
+  ) {
+    const clinical = isAdmin(actor) || actor.role === 'dentist';
+    return {
+      clinic: dto.clinic,
+      patient: actor.role === 'user' ? referenceId(actor.sub) : dto.patient,
+      dentist: dto.dentist,
+      services:
+        dto.services ?? (current ? this.scheduleRequest(current).services : []),
+      date: calendarDay(dto.date),
+      startTime: dto.startTime,
+      endTime: dto.endTime,
+      notes: {
+        patientNotes:
+          dto.notes?.patientNotes ?? current?.notes?.patientNotes ?? '',
+        clinicNotes: clinical
+          ? (dto.notes?.clinicNotes ?? current?.notes?.clinicNotes ?? '')
+          : (current?.notes?.clinicNotes ?? ''),
+      },
+    };
+  }
+
+  private async validateReferral(
+    value: string | undefined,
+    patient: string,
+    actor: UserActor,
+    session: ClientSession,
+    appointmentId?: string,
+  ) {
+    if (!value) return undefined;
+    const id = referenceId(value);
+    const referral = await this.referralModel
+      .findById(id)
+      .session(session)
+      .exec();
+    if (!referral) throw new BadRequestException('Referral not found.');
+    const linked = await this.appointmentModel
+      .findOne({ referral: id })
+      .session(session)
+      .exec();
+    if (linked) {
+      if (
+        !appointmentId ||
+        !sameId(linked._id, appointmentId) ||
+        !sameId(linked.patient, patient)
+      )
+        throw new ForbiddenException('Referral is already linked.');
+      return id;
+    }
+    if (referral.status === ReferralStatus.REJECTED)
+      throw new BadRequestException('Rejected referrals cannot be linked.');
+    if (
+      !referral.patient ||
+      !sameId(referral.patient, patient) ||
+      !referral.createdBy ||
+      (!isAdmin(actor) && !sameId(referral.createdBy, actor.sub))
+    ) {
+      throw new ForbiddenException('You cannot link this referral.');
+    }
+    return id;
   }
 
   private scheduleRequest(appointment: Appointment): ScheduleRequest {
     const dentist = clinicReferenceId(appointment.dentist);
     const patient = clinicReferenceId(appointment.patient);
     const clinic = clinicReferenceId(appointment.clinic);
-    if (!dentist || !patient || !clinic) throw new BadRequestException('Appointment participants are unavailable');
+    if (!dentist || !patient || !clinic)
+      throw new BadRequestException('Appointment participants are unavailable');
     return {
-      dentist, patient, clinic, date: appointment.date,
-      startTime: appointment.startTime, endTime: appointment.endTime,
-      services: appointment.services.map(service => clinicReferenceId(service)).filter((id): id is string => !!id),
+      dentist,
+      patient,
+      clinic,
+      date: appointment.date,
+      startTime: appointment.startTime,
+      endTime: appointment.endTime,
+      services: appointment.services
+        .map((service) => clinicReferenceId(service))
+        .filter((id): id is string => !!id),
     };
   }
 
   private async withExistingSchedule<T>(
     id: string,
+    actor: UserActor,
     proposedUserIds: string[],
     work: (current: AppointmentDocument, session: ClientSession) => Promise<T>,
+    sourceReferral?: Referral,
   ): Promise<T> {
-    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Invalid appointment ID');
+    if (!Types.ObjectId.isValid(id))
+      throw new BadRequestException('Invalid appointment ID');
     const snapshot = await this.appointmentModel.findById(id).exec();
-    if (!snapshot) throw new NotFoundException(`Appointment with ID "${id}" not found.`);
+    if (!snapshot)
+      throw new NotFoundException(`Appointment with ID "${id}" not found.`);
+    const authorize = (record: Appointment) => {
+      if (
+        sourceReferral &&
+        actor?.role === 'dentist' &&
+        sameId(sourceReferral.fromDoctorId, actor.sub)
+      )
+        return;
+      authorizeAppointment(actor, record);
+    };
+    authorize(snapshot);
     const before = this.scheduleRequest(snapshot);
-    return this.scheduling.withLocks([before.dentist, before.patient, ...proposedUserIds], async session => {
-      const current = await this.appointmentModel.findById(id).session(session).exec();
-      if (!current) throw new NotFoundException(`Appointment with ID "${id}" not found.`);
-      const after = this.scheduleRequest(current);
-      if (before.dentist !== after.dentist || before.patient !== after.patient) {
-        throw new ConflictException('Appointment participants changed. Reload and try again.');
-      }
-      return work(current, session);
-    });
+    return this.scheduling.withLocks(
+      [before.dentist, before.patient, ...proposedUserIds],
+      async (session) => {
+        const current = await this.appointmentModel
+          .findById(id)
+          .session(session)
+          .exec();
+        if (!current)
+          throw new NotFoundException(`Appointment with ID "${id}" not found.`);
+        authorize(current);
+        const after = this.scheduleRequest(current);
+        if (
+          before.dentist !== after.dentist ||
+          before.patient !== after.patient
+        ) {
+          throw new ConflictException(
+            'Appointment participants changed. Reload and try again.',
+          );
+        }
+        return work(current, session);
+      },
+    );
   }
 }

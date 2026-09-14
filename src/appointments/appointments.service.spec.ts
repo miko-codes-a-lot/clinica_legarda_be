@@ -1,3 +1,4 @@
+import { Referral } from '../referral/entities/referral.entity';
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { model } from 'mongoose';
@@ -7,6 +8,7 @@ import { AppointmentSchedulingService } from './appointment-scheduling.service';
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
 
 describe('Appointment changes', () => {
+  const actor = { sub: '000000000000000000000002', role: 'user' };
   const AppointmentModel = model('AppointmentChangeTest', AppointmentSchema);
   let service: AppointmentsService;
   let current: InstanceType<typeof AppointmentModel>;
@@ -29,6 +31,7 @@ describe('Appointment changes', () => {
       return query;
     });
     const module = await Test.createTestingModule({ providers: [AppointmentsService,
+      { provide: getModelToken(Referral.name), useValue: {} },
       { provide: getModelToken(Appointment.name), useValue: {
         findById: () => {
           const query = { session: () => query, populate: () => query, exec: async () => current };
@@ -44,14 +47,14 @@ describe('Appointment changes', () => {
   });
 
   it('persists a cancellation reason in appointment history', async () => {
-    const result = await service.cancel(current.id, '  Work conflict  ');
+    const result = await service.cancel(current.id, actor, '  Work conflict  ');
     expect(result.status).toBe(AppointmentStatus.CANCELLED);
     expect(result.history.at(-1)).toMatchObject({ reason: 'Work conflict' });
   });
 
   it('allows cancellation even when another appointment occupies the slot', async () => {
     findOne.mockResolvedValue({});
-    await expect(service.cancel(current.id)).resolves.toMatchObject({ status: AppointmentStatus.CANCELLED });
+    await expect(service.cancel(current.id, actor)).resolves.toMatchObject({ status: AppointmentStatus.CANCELLED });
   });
 
   it('persists a reschedule reason while returning the appointment to pending', async () => {
@@ -59,7 +62,7 @@ describe('Appointment changes', () => {
       date: new Date('2026-09-16'), startTime: '11:00', endTime: '12:00',
       patient: '000000000000000000000002', dentist: '000000000000000000000003',
       ...{ reason: '  Travel plans changed  ' },
-    });
+    }, actor);
     expect(result.status).toBe(AppointmentStatus.PENDING);
     expect(result.date.toISOString()).toBe('2026-09-16T00:00:00.000Z');
     expect(result.history.at(-1)).toMatchObject({ reason: 'Travel plans changed' });

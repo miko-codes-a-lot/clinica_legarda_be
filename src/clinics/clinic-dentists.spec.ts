@@ -10,11 +10,12 @@ it('looks up dentists by all assignments and only falls back for absent membersh
         populate: () => Promise.resolve(clinic),
       }),
   };
-  const find = jest
-    .fn()
-    .mockReturnValue({
+  const find = jest.fn().mockReturnValue({
+    select: () => ({
       populate: () => Promise.resolve([{ firstName: 'Assigned dentist' }]),
-    });
+    }),
+    populate: () => Promise.resolve([{ firstName: 'Assigned dentist' }]),
+  });
   const service = Reflect.construct(ClinicsService, [
     clinicModel,
     { find },
@@ -22,6 +23,7 @@ it('looks up dentists by all assignments and only falls back for absent membersh
   const result = await service.findOne(clinicId);
   expect(find).toHaveBeenCalledWith({
     role: 'dentist',
+    status: 'confirmed',
     $or: [
       { clinics: clinicId },
       { clinics: { $exists: false }, clinic: clinicId },

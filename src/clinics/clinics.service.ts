@@ -1,3 +1,5 @@
+import { DENTIST_DIRECTORY_FIELDS } from '../users/user-projections';
+import { UserStatus } from '../_shared/enum/user-status.enum';
 import {
   BadRequestException,
   ForbiddenException,
@@ -28,7 +30,12 @@ export class ClinicsService {
     const clinic = await this.clinicModel.findOne({ _id: id });
     if (!clinic) throw new NotFoundException('Clinic not found.');
     const dentists = await this.userModel
-      .find({ role: 'dentist', ...clinicMembershipFilter(id) })
+      .find({
+        role: 'dentist',
+        status: UserStatus.CONFIRMED,
+        ...clinicMembershipFilter(id),
+      })
+      .select(DENTIST_DIRECTORY_FIELDS)
       .populate('clinic clinics');
     return { ...clinic.toObject(), dentists };
   }

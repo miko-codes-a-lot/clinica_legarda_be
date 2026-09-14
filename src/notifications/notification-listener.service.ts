@@ -103,7 +103,7 @@ export class NotificationListenerService implements OnModuleInit {
     });
 
     // 3. Add admin notifications to the list
-    const admins = await this.userService.findAll('admin');
+    const admins = await this.userService.notificationStaffRecipients();
     const adminMessage = `New appointment created for Dr. ${dentistName} by patient ${patientName}.`;
     admins.forEach((admin) => {
       notificationsToCreate.push({
@@ -189,7 +189,7 @@ export class NotificationListenerService implements OnModuleInit {
     }
 
     // if (adminMessage) {
-    //   const admins = await this.userService.findAll('admin');
+    //   const admins = await this.userService.notificationStaffRecipients();
     //   admins.forEach((admin) => {
     //     notificationsToCreate.push({
     //       recipient: admin._id.toString(),

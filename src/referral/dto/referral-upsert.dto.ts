@@ -1,14 +1,12 @@
-import {
-  IsNotEmpty,
-  IsOptional,
-  IsMongoId,
-  IsEnum,
-} from 'class-validator';
+import { IsNotEmpty, IsOptional, IsMongoId, IsEnum } from 'class-validator';
 
 import { ReferralStatus } from 'src/_shared/enum/referral-status.enum';
 
-
 export class ReferralUpsertDto {
+  @IsOptional()
+  @IsMongoId()
+  patient?: string;
+
   @IsNotEmpty()
   @IsMongoId()
   fromDoctorId: string;
@@ -18,16 +16,15 @@ export class ReferralUpsertDto {
   fromClinicId: string;
 
   @IsOptional()
-  reason: string;
+  reason?: string;
 
   @IsOptional()
-  reasonOfDecline: string;
+  reasonOfDecline?: string;
 
   @IsOptional()
-  appointment: String;
+  appointment?: string;
 
   @IsOptional()
   @IsEnum(ReferralStatus)
   status?: ReferralStatus;
-
 }

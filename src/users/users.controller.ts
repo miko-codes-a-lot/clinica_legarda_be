@@ -1,3 +1,4 @@
+import { ProfilePictureGuard } from './profile-picture.guard';
 import {
   BadRequestException,
   Body,
@@ -12,6 +13,7 @@ import {
   Res,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from 'src/_shared/decorators/user.decorator';
@@ -44,24 +46,38 @@ export class UsersController {
 
   @HttpCode(HttpStatus.OK)
   @Get()
-  findAll() {
-    return this.usersService.findAll();
+  findAll(@User() actor: UserDto) {
+    return this.usersService.findAll(actor);
   }
 
   @Get('profile')
   profile(@User() user: UserDto) {
-    return this.usersService.findByOneUsername(user.username);
+    return this.usersService.findOne(user.sub, user);
+  }
+
+  @Get('dentists')
+  dentists(@User() actor: UserDto) {
+    return this.usersService.dentistDirectory(actor);
+  }
+
+  @Get('patients')
+  patients(@User() actor: UserDto) {
+    return this.usersService.patientDirectory(actor);
   }
 
   @HttpCode(HttpStatus.OK)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  findOne(@Param('id') id: string, @User() actor: UserDto) {
+    return this.usersService.findOne(id, actor);
   }
 
   @Get(':id/picture')
-  async getProfilePicture(@Param('id') id: string, @Res() res: Response) {
-    const user = await this.usersService.findOne(id);
+  async getProfilePicture(
+    @Param('id') id: string,
+    @Res() res: Response,
+    @User() actor: UserDto,
+  ) {
+    const user = await this.usersService.pictureProfile(id, actor);
 
     if (!user || !user.profilePicture) {
       return res.sendFile('default.png', {
@@ -91,7 +107,7 @@ export class UsersController {
       }[ext || ''] || 'application/octet-stream';
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    res.setHeader('Cache-Control', 'private, no-store');
 
     return res.sendFile(user.profilePicture, {
       root: join(process.cwd(), 'uploads', 'profile-pictures'),
@@ -99,6 +115,7 @@ export class UsersController {
   }
 
   @Put(':id/pictures')
+  @UseGuards(ProfilePictureGuard)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: profilePictureStorage,
@@ -119,6 +136,7 @@ export class UsersController {
   async uploadProfilePicture(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
+    @User() actor: UserDto,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded.');
@@ -127,6 +145,7 @@ export class UsersController {
     const updatedUser = await this.usersService.updateProfilePicture(
       id,
       file.filename,
+      actor,
     );
 
     return {
@@ -144,14 +163,18 @@ export class UsersController {
 
   @HttpCode(HttpStatus.OK)
   @Put(':id')
-  update(@Param('id') id: string, @Body() doc: UserUpsertDto, @User() actor: UserDto) {
+  update(
+    @Param('id') id: string,
+    @Body() doc: UserUpsertDto,
+    @User() actor: UserDto,
+  ) {
     return this.usersService.upsert(doc, id, actor);
   }
 
   @HttpCode(HttpStatus.OK)
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.usersService.delete(id);
+  delete(@Param('id') id: string, @User() actor: UserDto) {
+    return this.usersService.delete(id, actor);
   }
 
   @Public()

@@ -1,3 +1,4 @@
+import { Appointment } from '../appointments/entities/appointment.entity';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import mongoose, { Model } from 'mongoose';
 import { User, UserSchema } from './entities/user.entity';
@@ -68,6 +69,7 @@ describe('User membership writes and profile authorization', () => {
     service = new UsersService(
       userModel as unknown as Model<User>,
       clinicModel as unknown as Model<Clinic>,
+      {} as Model<Appointment>,
     );
   });
 

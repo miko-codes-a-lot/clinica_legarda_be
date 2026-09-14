@@ -22,7 +22,7 @@ describe('Appointment change notifications', () => {
         findById: () => ({ populate: async () => appointment }),
       } },
       { provide: NotificationsService, useValue: { createMany } },
-      { provide: UsersService, useValue: { findAll: async () => [] } },
+      { provide: UsersService, useValue: { notificationStaffRecipients: async () => [] } },
     ] }).compile();
     module.get(NotificationListenerService).onModuleInit();
   });

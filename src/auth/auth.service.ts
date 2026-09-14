@@ -76,7 +76,7 @@ export class AuthService {
   }
 
   async resendOtp(userId: string) {
-    const user = await this.userService.findOne(userId);
+    const user = await this.userService.findForAuthentication(userId);
     if (!user) throw new BadRequestException('User not found');
 
     if (!user.emailAddress) {
@@ -92,7 +92,7 @@ export class AuthService {
   async verifyOtp(userId: string, code: string) {
     await this.otpService.verify(userId, code);
 
-    const user = await this.userService.findOne(userId);
+    const user = await this.userService.findForAuthentication(userId);
     if (!user) throw new BadRequestException('User not found');
 
     await this.userService.updateOtpVerifiedAt(userId);

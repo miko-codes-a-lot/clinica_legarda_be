@@ -12,9 +12,14 @@ export type ReferralDocument = HydratedDocument<Referral>;
   timestamps: true,
 })
 export class Referral {
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' })
+  patient?: User;
+
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' })
+  createdBy?: User;
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true })
-  fromDoctorId: User[];
+  fromDoctorId: User;
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', required: true })
   fromClinicId: Clinic;
@@ -25,7 +30,11 @@ export class Referral {
   @Prop({ trim: true })
   reasonOfDecline: string;
 
-  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', required: false })
+  @Prop({
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Appointment',
+    required: false,
+  })
   appointment?: Appointment;
 
   @Prop({
@@ -34,7 +43,6 @@ export class Referral {
     default: ReferralStatus.PENDING,
   })
   status: ReferralStatus;
-
 }
 
 export const ReferralSchema = SchemaFactory.createForClass(Referral);

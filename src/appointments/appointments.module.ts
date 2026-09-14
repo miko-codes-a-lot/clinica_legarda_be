@@ -1,3 +1,4 @@
+import { Referral, ReferralSchema } from '../referral/entities/referral.entity';
 import { AppointmentSchedulingService } from './appointment-scheduling.service';
 import { Clinic, ClinicSchema } from '../clinics/entities/clinic.entity';
 import { Module } from '@nestjs/common';
@@ -15,9 +16,10 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: Appointment.name, schema: AppointmentSchema },
-      { name: User.name, schema: UserSchema },                 // ✅ ADD
+      { name: Referral.name, schema: ReferralSchema },
+      { name: User.name, schema: UserSchema }, // ✅ ADD
       { name: DentalCatalog.name, schema: DentalCatalogSchema },
-      { name: Clinic.name, schema: ClinicSchema }
+      { name: Clinic.name, schema: ClinicSchema },
     ]),
   ],
   controllers: [AppointmentsController],
