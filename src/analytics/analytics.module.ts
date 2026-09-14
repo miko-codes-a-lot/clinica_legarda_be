@@ -7,15 +7,15 @@ import {
 } from 'src/appointments/entities/appointment.entity';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
-  Notification,
-  NotificationSchema,
-} from 'src/notifications/entities/notification.entity';
+  Referral,
+  ReferralSchema,
+} from 'src/referral/entities/referral.entity';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Appointment.name, schema: AppointmentSchema },
-      { name: Notification.name, schema: NotificationSchema },
+      { name: Referral.name, schema: ReferralSchema },
     ]),
   ],
   controllers: [AnalyticsController],
