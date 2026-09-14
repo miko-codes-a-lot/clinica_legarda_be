@@ -7,7 +7,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { ClientSession, Model, Types } from 'mongoose';
+import { ClientSession, Model, Types, UpdateQuery } from 'mongoose';
 import {
   Appointment,
   AppointmentDocument,
@@ -75,7 +75,7 @@ export class AppointmentsService {
               ...validated,
               ...(referral && { referral }),
               status: AppointmentStatus.PENDING,
-              history: [{ action: 'Appointment created.' }],
+              history: [this.historyEntry('Appointment created.', actor)],
             },
           ],
           { session },
@@ -166,6 +166,7 @@ export class AppointmentsService {
       actor,
       [dto.dentist, dto.patient],
       async (current, session) => {
+        this.requireStatus(current, [AppointmentStatus.PENDING]);
         if (
           !isAdmin(actor) &&
           (!sameId(dto.patient, current.patient) ||
@@ -187,16 +188,16 @@ export class AppointmentsService {
           id,
         );
         const validated = await this.scheduling.validate(request, session, id);
-        await this.appointmentModel
-          .findByIdAndUpdate(
-            id,
-            {
-              $set: { ...request, ...validated, referral: referral || null },
-              $push: { history: { action: 'Appointment details updated.' } },
+        await this.writeCurrent(
+          current,
+          {
+            $set: { ...request, ...validated, referral: referral || null },
+            $push: {
+              history: this.historyEntry('Appointment details updated.', actor),
             },
-            { session, runValidators: true },
-          )
-          .exec();
+          },
+          session,
+        );
       },
     );
     return this.findOne(id, actor);
@@ -220,6 +221,24 @@ export class AppointmentsService {
     );
   }
 
+  complete(id: string, actor: UserActor) {
+    return this.updateStatus(
+      id,
+      AppointmentStatus.COMPLETED,
+      'Appointment completed.',
+      actor,
+    );
+  }
+
+  noShow(id: string, actor: UserActor) {
+    return this.updateStatus(
+      id,
+      AppointmentStatus.NO_SHOW,
+      'Appointment marked as no show.',
+      actor,
+    );
+  }
+
   cancel(id: string, actor: UserActor, reason?: string) {
     return this.updateStatus(
       id,
@@ -236,33 +255,36 @@ export class AppointmentsService {
     actor: UserActor,
   ) {
     await this.withExistingSchedule(id, actor, [], async (current, session) => {
+      this.requireStatus(current, [
+        AppointmentStatus.PENDING,
+        AppointmentStatus.CONFIRMED,
+      ]);
       const request = {
         ...this.scheduleRequest(current),
         date: calendarDay(dto.date),
         startTime: dto.startTime,
         endTime: dto.endTime,
       };
-      await this.scheduling.validate(request, session, id);
-      await this.appointmentModel
-        .findByIdAndUpdate(
-          id,
-          {
-            $set: {
-              date: request.date,
-              startTime: request.startTime,
-              endTime: request.endTime,
-              status: AppointmentStatus.PENDING,
-            },
-            $push: {
-              history: {
-                action: 'Appointment rescheduled.',
-                reason: dto.reason?.trim(),
-              },
-            },
+      const validated = await this.scheduling.validate(request, session, id);
+      await this.writeCurrent(
+        current,
+        {
+          $set: {
+            date: validated.date,
+            startTime: validated.startTime,
+            endTime: validated.endTime,
+            status: AppointmentStatus.PENDING,
           },
-          { session, runValidators: true },
-        )
-        .exec();
+          $push: {
+            history: this.historyEntry(
+              'Appointment rescheduled.',
+              actor,
+              dto.reason,
+            ),
+          },
+        },
+        session,
+      );
     });
     return this.findOne(id, actor);
   }
@@ -277,7 +299,9 @@ export class AppointmentsService {
           id,
           {
             $set: { 'notes.clinicNotes': dentistNotes },
-            $push: { history: { action: 'Dentist added notes.' } },
+            $push: {
+              history: this.historyEntry('Clinical notes updated.', actor),
+            },
           },
           { session, runValidators: true },
         )
@@ -342,16 +366,17 @@ export class AppointmentsService {
       async (current, session) => {
         if (!current.referral || !sameId(current.referral, referralId))
           throw new ConflictException('Referral link changed.');
-        await this.appointmentModel
-          .findByIdAndUpdate(
-            current._id,
-            {
-              $set: { status: AppointmentStatus.REJECTED },
-              $push: { history: { action: 'Appointment rejected.' } },
+        this.requireStatus(current, [AppointmentStatus.PENDING]);
+        await this.writeCurrent(
+          current,
+          {
+            $set: { status: AppointmentStatus.REJECTED },
+            $push: {
+              history: this.historyEntry('Appointment rejected.', actor),
             },
-            { session, runValidators: true },
-          )
-          .exec();
+          },
+          session,
+        );
         await rejectReferral(session);
       },
       referral,
@@ -371,6 +396,14 @@ export class AppointmentsService {
         current,
         status !== AppointmentStatus.CANCELLED,
       );
+      const allowed =
+        status === AppointmentStatus.CANCELLED
+          ? [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]
+          : status === AppointmentStatus.COMPLETED ||
+              status === AppointmentStatus.NO_SHOW
+            ? [AppointmentStatus.CONFIRMED]
+            : [AppointmentStatus.PENDING];
+      this.requireStatus(current, allowed);
       if (status === AppointmentStatus.CONFIRMED) {
         await this.scheduling.validate(
           this.scheduleRequest(current),
@@ -379,20 +412,50 @@ export class AppointmentsService {
           [AppointmentStatus.CONFIRMED],
         );
       }
-      await this.appointmentModel
-        .findByIdAndUpdate(
-          id,
-          {
-            $set: { status },
-            $push: {
-              history: { action: historyAction, reason: reason?.trim() },
-            },
-          },
-          { session, runValidators: true },
-        )
-        .exec();
+      await this.writeCurrent(
+        current,
+        {
+          $set: { status },
+          $push: { history: this.historyEntry(historyAction, actor, reason) },
+        },
+        session,
+      );
     });
     return this.findOne(id, actor);
+  }
+
+  private requireStatus(current: Appointment, allowed: AppointmentStatus[]) {
+    if (!allowed.includes(current.status)) {
+      throw new ConflictException(
+        `This action is not allowed for a ${current.status} appointment.`,
+      );
+    }
+  }
+
+  private historyEntry(action: string, actor: UserActor, reason?: string) {
+    return {
+      action,
+      ...(reason !== undefined && { reason: reason.trim() }),
+      actorId: referenceId(actor.sub),
+      actorRole: actor.role,
+      ...(actor.username && { actorName: actor.username }),
+    };
+  }
+
+  /** State and history are one conditional write inside the participant transaction. */
+  private async writeCurrent(
+    current: AppointmentDocument,
+    update: UpdateQuery<Appointment>,
+    session: ClientSession,
+  ) {
+    const updated = await this.appointmentModel
+      .findOneAndUpdate({ _id: current._id, status: current.status }, update, {
+        session,
+        runValidators: true,
+      })
+      .exec();
+    if (!updated)
+      throw new ConflictException('Appointment changed. Reload and try again.');
   }
 
   private writeFields(

@@ -15,6 +15,7 @@ describe('Appointment change notifications', () => {
     dentist: { _id: 'dentist-1', firstName: 'Juan', lastName: 'Cruz' },
   };
   beforeEach(async () => {
+    appointment.status = 'pending';
     createMany = jest.fn().mockResolvedValue([]);
     const module = await Test.createTestingModule({ providers: [NotificationListenerService,
       { provide: getModelToken(Appointment.name), useValue: {
@@ -37,4 +38,14 @@ describe('Appointment change notifications', () => {
       expect.objectContaining({ recipient: 'patient-1', link: '/app/my-appointment' }),
     ]));
   });
+  it.each(['completed', 'no_show', 'confirmed'])('notifies both participants of %s without assuming the dentist acted', async (status) => {
+    appointment.status = status;
+    onChange({ operationType: 'update', documentKey: { _id: 'appointment-1' }, updateDescription: { updatedFields: { status } } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(createMany).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ recipient: 'patient-1', link: '/app/my-appointment' }),
+      expect.objectContaining({ recipient: 'dentist-1', link: '/dentist/appointment/details/appointment-1', message: expect.not.stringContaining('You have confirmed') }),
+    ]));
+  });
+
 });

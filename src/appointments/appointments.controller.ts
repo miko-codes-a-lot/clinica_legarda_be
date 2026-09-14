@@ -11,6 +11,7 @@ import {
   HttpStatus,
   Patch,
   Query,
+  ValidationPipe,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
@@ -24,7 +25,8 @@ export class AppointmentsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   create(
-    @Body() createAppointmentDto: AppointmentUpsertDto,
+    @Body(new ValidationPipe({ transform: true }))
+    createAppointmentDto: AppointmentUpsertDto,
     @User() actor: UserActor,
   ) {
     return this.appointmentsService.create(createAppointmentDto, actor);
@@ -65,7 +67,8 @@ export class AppointmentsController {
   @HttpCode(HttpStatus.OK)
   update(
     @Param('id') id: string,
-    @Body() updateAppointmentDto: AppointmentUpsertDto,
+    @Body(new ValidationPipe({ transform: true }))
+    updateAppointmentDto: AppointmentUpsertDto,
     @User() actor: UserActor,
   ) {
     return this.appointmentsService.update(id, updateAppointmentDto, actor);
@@ -83,6 +86,18 @@ export class AppointmentsController {
     return this.appointmentsService.reject(id, actor);
   }
 
+  @Patch(':id/complete')
+  @HttpCode(HttpStatus.OK)
+  complete(@Param('id') id: string, @User() actor: UserActor) {
+    return this.appointmentsService.complete(id, actor);
+  }
+
+  @Patch(':id/no-show')
+  @HttpCode(HttpStatus.OK)
+  noShow(@Param('id') id: string, @User() actor: UserActor) {
+    return this.appointmentsService.noShow(id, actor);
+  }
+
   @Patch(':id/cancel')
   @HttpCode(HttpStatus.OK)
   cancel(
@@ -97,7 +112,8 @@ export class AppointmentsController {
   @HttpCode(HttpStatus.OK)
   reschedule(
     @Param('id') id: string,
-    @Body() rescheduleDto: RescheduleAppointmentDto,
+    @Body(new ValidationPipe({ transform: true }))
+    rescheduleDto: RescheduleAppointmentDto,
     @User() actor: UserActor,
   ) {
     return this.appointmentsService.reschedule(id, rescheduleDto, actor);

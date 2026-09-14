@@ -36,11 +36,11 @@ describe('Appointment changes', () => {
         findById: () => {
           const query = { session: () => query, populate: () => query, exec: async () => current };
           return query;
-        }, findOne, findByIdAndUpdate: update,
+        }, findOne, findByIdAndUpdate: update, findOneAndUpdate: update,
       } },
       { provide: AppointmentSchedulingService, useValue: {
         withLocks: async (_ids: string[], work: (session: unknown) => Promise<unknown>) => work({}),
-        validate: jest.fn().mockResolvedValue(undefined),
+        validate: jest.fn().mockImplementation(async (request) => request),
       } },
     ] }).compile();
     service = module.get(AppointmentsService);

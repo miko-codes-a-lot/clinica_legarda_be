@@ -17,6 +17,15 @@ export class AppointmentHistory {
   @Prop({ trim: true, maxlength: 500 })
   reason?: string;
 
+  @Prop()
+  actorId?: string;
+
+  @Prop()
+  actorRole?: string;
+
+  @Prop()
+  actorName?: string;
+
   timestamp: Date;
 }
 

@@ -1,4 +1,4 @@
-import { IsDate, IsNotEmpty, IsString, Matches } from 'class-validator';
+import { IsDate, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AppointmentChangeReasonDto } from './appointment-change-reason.dto';
 
@@ -22,11 +22,12 @@ export class RescheduleAppointmentDto extends AppointmentChangeReasonDto {
   })
   endTime: string;
 
-  @IsNotEmpty()
+  // Older clients echo these IDs; rescheduling always uses stored identities.
+  @IsOptional()
   @IsString()
-  patient: string; // patient ID
+  patient?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  dentist: string; // dentist ID
+  dentist?: string;
 }

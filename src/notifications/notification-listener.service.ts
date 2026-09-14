@@ -157,7 +157,7 @@ export class NotificationListenerService implements OnModuleInit {
         break;
       case AppointmentStatus.CONFIRMED:
         patientMessage = `Your appointment with Dr. ${dentistName} has been confirmed.`;
-        dentistMessage = `You have confirmed the appointment for ${patientName}.`;
+        dentistMessage = `The appointment for ${patientName} has been confirmed.`;
         // adminMessage = `Dr. ${dentistName} confirmed the appointment for ${patientName}.`;
         break;
       case AppointmentStatus.CANCELLED:
@@ -167,6 +167,11 @@ export class NotificationListenerService implements OnModuleInit {
         break;
       case AppointmentStatus.COMPLETED:
         patientMessage = `Your appointment with Dr. ${dentistName} is complete. Thank you!`;
+        dentistMessage = `The appointment for ${patientName} is complete.`;
+        break;
+      case AppointmentStatus.NO_SHOW:
+        patientMessage = `Your appointment with Dr. ${dentistName} has been marked as no show.`;
+        dentistMessage = `The appointment for ${patientName} has been marked as no show.`;
         break;
     }
 

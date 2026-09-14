@@ -374,14 +374,13 @@ localTests('Record access boundaries', () => {
     expect(created.history.map((entry) => entry.action)).toEqual([
       'Appointment created.',
     ]);
-    await service.approve(created.id, admin);
     await service.updateDentistNotes(
       created.id,
       'Preserve chart',
       actor('dentist'),
     );
     const updated = await service.update(created.id, forged, actor('user'));
-    expect(updated.status).toBe('confirmed');
+    expect(updated.status).toBe('pending');
     expect(updated.notes.clinicNotes).toBe('Preserve chart');
     expect(updated.history.some((entry) => entry.action === 'Forged')).toBe(
       false,

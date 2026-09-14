@@ -1,6 +1,7 @@
 export interface UserActor {
   sub: string;
   role: string;
+  username?: string;
 }
 
 /** Admin membership is global; future restrictions belong in this policy. */
