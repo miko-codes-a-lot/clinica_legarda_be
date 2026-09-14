@@ -1,7 +1,8 @@
 import { IsDate, IsNotEmpty, IsString, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
+import { AppointmentChangeReasonDto } from './appointment-change-reason.dto';
 
-export class RescheduleAppointmentDto {
+export class RescheduleAppointmentDto extends AppointmentChangeReasonDto {
   @IsNotEmpty()
   @Type(() => Date)
   @IsDate()

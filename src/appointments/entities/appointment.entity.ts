@@ -14,6 +14,9 @@ export class AppointmentHistory {
   @Prop({ required: true })
   action: string;
 
+  @Prop({ trim: true, maxlength: 500 })
+  reason?: string;
+
   timestamp: Date;
 }
 

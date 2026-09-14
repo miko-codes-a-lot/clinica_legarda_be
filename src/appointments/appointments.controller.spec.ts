@@ -1,20 +1,47 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import * as request from 'supertest';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
 
-describe('AppointmentsController', () => {
-  let controller: AppointmentsController;
-
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+describe('Appointment change HTTP contracts', () => {
+  let app: INestApplication;
+  const cancel = jest.fn((id: string, reason?: string) => ({ _id: id, reason }));
+  const reschedule = jest.fn((id: string, dto: object) => ({ _id: id, ...dto }));
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({
       controllers: [AppointmentsController],
-      providers: [AppointmentsService],
+      providers: [{ provide: AppointmentsService, useValue: { cancel, reschedule } }],
     }).compile();
-
-    controller = module.get<AppointmentsController>(AppointmentsController);
+    app = module.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe());
+    await app.init();
   });
+  afterAll(() => app.close());
+  beforeEach(() => { cancel.mockClear(); reschedule.mockClear(); });
 
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
+  it('passes a cancellation reason through the HTTP endpoint', async () => {
+    await request(app.getHttpServer()).patch('/appointments/a1/cancel')
+      .send({ reason: 'Work conflict' }).expect(200).expect({ _id: 'a1', reason: 'Work conflict' });
+    expect(cancel).toHaveBeenCalledWith('a1', 'Work conflict');
+  });
+  it.each(['', '   ', null, 17, 'x'.repeat(501)])('rejects invalid cancellation reason %p', async reason => {
+    await request(app.getHttpServer()).patch('/appointments/a1/cancel').send({ reason }).expect(400);
+    expect(cancel).not.toHaveBeenCalled();
+  });
+  it('preserves compatibility for older clients that omit a reason', async () => {
+    await request(app.getHttpServer()).patch('/appointments/a1/cancel').send({}).expect(200);
+  });
+  it('validates the reason on reschedules as well as cancellations', async () => {
+    await request(app.getHttpServer()).patch('/appointments/a1/reschedule').send({
+      date: '2026-09-16', startTime: '11:00', endTime: '12:00', patient: 'p1', dentist: 'd1', reason: '   ',
+    }).expect(400);
+    expect(reschedule).not.toHaveBeenCalled();
+  });
+  it('passes the reason and chosen schedule to the reschedule service', async () => {
+    await request(app.getHttpServer()).patch('/appointments/a1/reschedule').send({
+      date: '2026-09-16', startTime: '11:00', endTime: '12:00', patient: 'p1', dentist: 'd1', reason: 'Travel plans',
+    }).expect(200);
+    expect(reschedule).toHaveBeenCalledWith('a1', expect.objectContaining({ reason: 'Travel plans', startTime: '11:00' }));
   });
 });

@@ -168,11 +168,12 @@ export class AppointmentsService {
     );
   }
 
-  cancel(id: string) {
+  cancel(id: string, reason?: string) {
     return this.updateStatus(
       id,
       AppointmentStatus.CANCELLED,
       'Appointment cancelled.',
+      reason,
     );
   }
 
@@ -213,7 +214,7 @@ export class AppointmentsService {
         endTime: dto.endTime,
         status: AppointmentStatus.PENDING, // return to pending until clinic re-approves
       },
-      $push: { history: { action: 'Appointment rescheduled by patient.' } },
+      $push: { history: { action: 'Appointment rescheduled by patient.', reason: dto.reason?.trim() } },
     };
 
     const updatedAppointment = await this.appointmentModel
@@ -256,6 +257,7 @@ export class AppointmentsService {
     id: string,
     status: AppointmentStatus,
     historyAction: string,
+    reason?: string,
   ) {
 
     const currentAppointment = await this.appointmentModel.findById(id).exec();
@@ -265,7 +267,7 @@ export class AppointmentsService {
     }
 
     // 🔴 DUPLICATE CHECK
-    const duplicate = await this.appointmentModel.findOne({
+    const duplicate = status === AppointmentStatus.CONFIRMED && await this.appointmentModel.findOne({
       _id: { $ne: id }, // exclude current appointment
       dentist: currentAppointment.dentist,
       date: currentAppointment.date,
@@ -285,7 +287,7 @@ export class AppointmentsService {
         id,
         {
           $set: { status },
-          $push: { history: { action: historyAction } },
+          $push: { history: { action: historyAction, reason: reason?.trim() } },
         },
         { new: true },
       )

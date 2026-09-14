@@ -35,8 +35,12 @@ export class NotificationListenerService implements OnModuleInit {
               case 'insert':
                 await this.handleAppointmentCreation(change.fullDocument);
                 break;
-              case 'update':
-                if (change.updateDescription.updatedFields?.status) {
+              case 'update': {
+                const fields = change.updateDescription.updatedFields;
+                const rescheduled = ['date', 'startTime', 'endTime'].some(
+                  field => Object.prototype.hasOwnProperty.call(fields, field),
+                );
+                if (fields?.status || rescheduled) {
                   const updatedAppointment = await this.appointmentModel
                     .findById(change.documentKey._id)
                     .populate('patient dentist');
@@ -44,10 +48,12 @@ export class NotificationListenerService implements OnModuleInit {
                   if (updatedAppointment) {
                     await this.handleAppointmentStatusUpdate(
                       updatedAppointment,
+                      rescheduled,
                     );
                   }
                 }
                 break;
+              }
             }
           } catch (error) {
             this.logger.error('Error processing stream event:', error);
@@ -85,7 +91,7 @@ export class NotificationListenerService implements OnModuleInit {
       recipient: appointment.patient._id.toString(),
       message: `Your appointment with Dr. ${dentistName} has been booked and is pending confirmation.`,
       type: NotificationType.APPOINTMENT_CREATED,
-      link: `/app/my-appointment/details/${appointment._id.toString()}`,
+      link: '/app/my-appointment',
     });
 
     // 2. Add dentist notification to the list
@@ -93,7 +99,7 @@ export class NotificationListenerService implements OnModuleInit {
       recipient: appointment.dentist._id.toString(),
       message: `You have a new appointment request from ${patientName}.`,
       type: NotificationType.APPOINTMENT_CREATED,
-      link: `/admin/appointment/details/${appointment._id.toString()}`,
+      link: `/dentist/appointment/details/${appointment._id.toString()}`,
     });
 
     // 3. Add admin notifications to the list
@@ -118,6 +124,7 @@ export class NotificationListenerService implements OnModuleInit {
 
   private async handleAppointmentStatusUpdate(
     appointment: AppointmentDocument,
+    rescheduled = false,
   ) {
     this.logger.log(
       `Appointment ${appointment._id.toString()} status updated to: ${appointment.status}`,
@@ -134,7 +141,20 @@ export class NotificationListenerService implements OnModuleInit {
     // the admin is only interested in the creation
     // let adminMessage: string | null = null;
 
-    switch (appointment.status) {
+    if (rescheduled) {
+      const date = new Date(appointment.date).toISOString().slice(0, 10);
+      const schedule = `${date}, ${appointment.startTime}–${appointment.endTime}`;
+      patientMessage = `Your appointment with Dr. ${dentistName} has been rescheduled to ${schedule} and is ${appointment.status}.`;
+      dentistMessage = `The appointment for ${patientName} has been rescheduled to ${schedule} and is ${appointment.status}.`;
+    } else switch (appointment.status) {
+      case AppointmentStatus.PENDING:
+        patientMessage = `Your appointment with Dr. ${dentistName} is pending confirmation.`;
+        dentistMessage = `The appointment for ${patientName} is pending confirmation.`;
+        break;
+      case AppointmentStatus.REJECTED:
+        patientMessage = `Your appointment with Dr. ${dentistName} has been rejected.`;
+        dentistMessage = `The appointment for ${patientName} has been rejected.`;
+        break;
       case AppointmentStatus.CONFIRMED:
         patientMessage = `Your appointment with Dr. ${dentistName} has been confirmed.`;
         dentistMessage = `You have confirmed the appointment for ${patientName}.`;
@@ -155,7 +175,7 @@ export class NotificationListenerService implements OnModuleInit {
         recipient: appointment.patient._id.toString(),
         message: patientMessage,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
-        link: `/app/my-appointment/details/${appointment._id.toString()}`,
+        link: '/app/my-appointment',
       });
     }
 
@@ -164,7 +184,7 @@ export class NotificationListenerService implements OnModuleInit {
         recipient: appointment.dentist._id.toString(),
         message: dentistMessage,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
-        link: `/admin/appointment/details/${appointment._id.toString()}`,
+        link: `/dentist/appointment/details/${appointment._id.toString()}`,
       });
     }
 

@@ -13,6 +13,7 @@ import * as cookie from 'cookie';
 
 @WebSocketGateway({
   namespace: 'notifications',
+  path: '/api/socket.io',
 })
 export class RtNotificationsGateway
   implements OnGatewayConnection, OnGatewayDisconnect

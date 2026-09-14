@@ -13,6 +13,7 @@ import {
 import { AppointmentsService } from './appointments.service';
 import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
+import { AppointmentChangeReasonDto } from './dto/appointment-change-reason.dto';
 
 @Controller('appointments')
 export class AppointmentsController {
@@ -65,8 +66,8 @@ export class AppointmentsController {
 
   @Patch(':id/cancel')
   @HttpCode(HttpStatus.OK)
-  cancel(@Param('id') id: string) {
-    return this.appointmentsService.cancel(id);
+  cancel(@Param('id') id: string, @Body() dto: AppointmentChangeReasonDto) {
+    return this.appointmentsService.cancel(id, dto.reason);
   }
 
   @Patch(':id/reschedule')
