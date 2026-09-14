@@ -546,6 +546,13 @@ localTests('Record access boundaries', () => {
   });
 
   it('authorizes legacy linked referral context without revealing unrelated chart details and awaits rejection', async () => {
+    const expectTimestamps = <T extends object>(record: T) => {
+      const createdAt: unknown = Reflect.get(record, 'createdAt');
+      const updatedAt: unknown = Reflect.get(record, 'updatedAt');
+      expect(createdAt).toBeInstanceOf(Date);
+      expect(updatedAt).toBeInstanceOf(Date);
+      return record as T & { createdAt: Date; updatedAt: Date };
+    };
     const referral = await referrals.create(source());
     const receiving = await appointments.create({
       ...booking({ dentist: fixture.otherDentist }),
@@ -556,7 +563,9 @@ localTests('Record access boundaries', () => {
       },
       history: [{ action: 'Private history' }],
     });
-    const result = await referralService.findOne(referral.id, actor('dentist'));
+    const result = expectTimestamps(
+      await referralService.findOne(referral.id, actor('dentist')),
+    );
     expect(result.appointment?.patient._id.toString()).toBe(fixture.patient);
     expect(result.appointment?.notes.patientNotes).toBe('Relevant');
     expect(result.appointment?.notes.clinicNotes).toBeUndefined();
@@ -564,11 +573,13 @@ localTests('Record access boundaries', () => {
     await expect(
       service.findOne(receiving.id, actor('dentist')),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(
-      (await referralService.findAll(actor('dentist', true))).map((record) =>
-        record._id.toString(),
-      ),
-    ).toEqual([referral.id]);
+    const listed = await referralService.findAll(actor('dentist', true));
+    expect(listed.map((record) => record._id.toString())).toEqual([
+      referral.id,
+    ]);
+    const listedReferral = expectTimestamps(listed[0]);
+    expect(listedReferral.createdAt).toEqual(result.createdAt);
+    expect(listedReferral.updatedAt).toEqual(result.updatedAt);
     expect(
       (
         await referralService.findAllByDentist(
@@ -588,12 +599,18 @@ localTests('Record access boundaries', () => {
     await expect(
       referralService.findOne(referral.id, actor('user', true)),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    const rejected = await referralService.reject(
-      'Source declined',
-      referral.id,
-      actor('dentist'),
+    const rejected = expectTimestamps(
+      await referralService.reject(
+        'Source declined',
+        referral.id,
+        actor('dentist'),
+      ),
     );
     expect(rejected.status).toBe('rejected');
+    expect(rejected.createdAt).toEqual(result.createdAt);
+    expect(rejected.updatedAt.getTime()).toBeGreaterThanOrEqual(
+      result.updatedAt.getTime(),
+    );
     expect((await appointments.findById(receiving.id))?.status).toBe(
       'rejected',
     );

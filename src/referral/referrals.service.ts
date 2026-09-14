@@ -123,6 +123,8 @@ export class ReferralsService {
       reason: referral.reason,
       reasonOfDecline: referral.reasonOfDecline,
       status: referral.status,
+      createdAt: referral.createdAt,
+      updatedAt: referral.updatedAt,
       appointment: linked,
     };
   }

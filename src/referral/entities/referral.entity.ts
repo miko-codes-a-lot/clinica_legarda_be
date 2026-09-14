@@ -12,6 +12,10 @@ export type ReferralDocument = HydratedDocument<Referral>;
   timestamps: true,
 })
 export class Referral {
+  readonly createdAt: Date;
+
+  readonly updatedAt: Date;
+
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' })
   patient?: User;
 
