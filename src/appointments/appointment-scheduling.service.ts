@@ -11,6 +11,11 @@ import { calendarDay, ScheduleRequest, validateSchedule } from './appointment-sc
 
 export const OCCUPIED_STATUSES = [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED];
 
+function schedulingReferenceId(id: string): string {
+  if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Invalid scheduling reference');
+  return new Types.ObjectId(id).toHexString();
+}
+
 @Injectable()
 export class AppointmentSchedulingService {
   constructor(
@@ -21,8 +26,7 @@ export class AppointmentSchedulingService {
   ) {}
 
   async withLocks<T>(userIds: string[], work: (session: ClientSession) => Promise<T>): Promise<T> {
-    if (userIds.some(id => !Types.ObjectId.isValid(id))) throw new BadRequestException('Invalid scheduling participant');
-    const ids = [...new Set(userIds.map(id => new Types.ObjectId(id).toHexString()))].sort();
+    const ids = [...new Set(userIds.map(schedulingReferenceId))].sort();
     return this.appointments.db.transaction(async session => {
       // A write lock before any booking read makes competing transactions retry
       // against fresh data, across server processes. Sorting also protects patients
@@ -37,7 +41,16 @@ export class AppointmentSchedulingService {
     });
   }
 
-  async validate(request: ScheduleRequest, session: ClientSession, excludeId?: string, statuses = OCCUPIED_STATUSES): Promise<void> {
+  async validate(input: ScheduleRequest, session: ClientSession, excludeId?: string, statuses = OCCUPIED_STATUSES): Promise<void> {
+    // Mongo casts equivalent uppercase IDs, but domain comparisons and catalog
+    // maps use strings. Canonicalize every request reference before either step.
+    const request: ScheduleRequest = {
+      ...input,
+      dentist: schedulingReferenceId(input.dentist),
+      patient: schedulingReferenceId(input.patient),
+      clinic: schedulingReferenceId(input.clinic),
+      services: [...new Set(input.services.map(schedulingReferenceId))],
+    };
     const dentist = await this.users.findById(request.dentist).session(session).exec();
     const clinic = await this.clinics.findById(request.clinic).session(session).exec();
     if (!dentist || !clinic) throw new BadRequestException('Invalid dentist or clinic selected');

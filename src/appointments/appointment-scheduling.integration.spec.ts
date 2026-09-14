@@ -138,4 +138,33 @@ localTests('Appointment scheduling persistence', () => {
     expect(await appointments.countDocuments()).toBe(2);
   });
 
+  it.each(['dentist', 'patient'])('cannot bypass occupied slots with an uppercase %s ID', async identity => {
+    await appointments.create({ ...fixture, date, startTime: '09:00', endTime: '10:00', status: 'confirmed' });
+    const otherDentist = await users.create({ role: 'dentist', status: 'confirmed', clinics: [fixture.clinic], operatingHours: hours });
+    const dto = {
+      clinic: fixture.clinic, date, startTime: '09:30', endTime: '10:30',
+      dentist: identity === 'dentist' ? fixture.dentist.toUpperCase() : otherDentist.id,
+      patient: identity === 'patient' ? fixture.patient.toUpperCase() : fixture.otherPatient,
+    };
+    await expect(service.create(dto)).rejects.toThrow(identity === 'dentist' ? 'Dentist already' : 'Patient already');
+    expect(await appointments.countDocuments()).toBe(1);
+  });
+
+  it('counts existing daily capacity for an uppercase dentist ID', async () => {
+    await appointments.create({ ...fixture, date, startTime: '09:00', endTime: '10:00', status: 'confirmed' });
+    await users.updateOne({ _id: fixture.dentist }, { $set: { maxWorkingMinutesPerDay: 100 } });
+    await expect(service.create({
+      clinic: fixture.clinic, dentist: fixture.dentist.toUpperCase(), patient: fixture.otherPatient,
+      date, startTime: '11:00', endTime: '12:00',
+    })).rejects.toThrow('remaining working time');
+  });
+
+  it('accepts equivalent uppercase clinic, participant, and service IDs for an available slot', async () => {
+    const treatment = await catalog.create({ name: 'Fixture uppercase reference', duration: 60 });
+    await expect(service.create({
+      clinic: fixture.clinic.toUpperCase(), dentist: fixture.dentist.toUpperCase(), patient: fixture.patient.toUpperCase(),
+      services: [treatment.id.toUpperCase()], date, startTime: '09:00', endTime: '10:00',
+    })).resolves.toMatchObject({ status: 'pending' });
+  });
+
 });
