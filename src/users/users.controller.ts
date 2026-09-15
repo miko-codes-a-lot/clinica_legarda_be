@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
   Res,
@@ -169,6 +170,11 @@ export class UsersController {
     @User() actor: UserDto,
   ) {
     return this.usersService.upsert(doc, id, actor);
+  }
+
+  @Patch(':id/approve-dentist')
+  approveDentist(@Param('id') id: string, @User() actor: UserDto) {
+    return this.usersService.approveDentist(id, actor);
   }
 
   @HttpCode(HttpStatus.OK)

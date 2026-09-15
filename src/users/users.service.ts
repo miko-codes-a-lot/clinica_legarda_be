@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -134,6 +135,32 @@ export class UsersService {
       id,
       { profilePicture: fileName },
       { new: true, runValidators: true },
+    );
+  }
+
+  async approveDentist(id: string, actor: UserActor) {
+    if (!isAdmin(actor)) {
+      throw new ForbiddenException('Only administrators may approve dentists.');
+    }
+    const userId = referenceId(id);
+    const approved = await this.userModel
+      .findOneAndUpdate(
+        { _id: userId, role: 'dentist', status: UserStatus.PENDING },
+        { $set: { status: UserStatus.CONFIRMED } },
+        { new: true, runValidators: true },
+      )
+      .populate('clinic clinics');
+    if (approved) return approved;
+
+    const existing = await this.userModel.findById(userId);
+    if (!existing) throw new NotFoundException('Dentist not found.');
+    if (existing.role !== 'dentist') {
+      throw new BadRequestException(
+        'Only dentist accounts can be approved here.',
+      );
+    }
+    throw new ConflictException(
+      'Only pending dentists can be approved. Refresh the account details.',
     );
   }
 
