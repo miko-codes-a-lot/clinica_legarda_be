@@ -75,6 +75,7 @@ export class AppointmentsService {
               ...validated,
               ...(referral && { referral }),
               status: AppointmentStatus.PENDING,
+              createdBy: referenceId(actor.sub),
               history: [this.historyEntry('Appointment created.', actor)],
             },
           ],
@@ -212,12 +213,16 @@ export class AppointmentsService {
     );
   }
 
-  reject(id: string, actor: UserActor) {
+  async reject(id: string, actor: UserActor, reason: string) {
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) {
+      throw new BadRequestException('Enter a rejection reason of up to 500 characters.');
+    }
     return this.updateStatus(
       id,
       AppointmentStatus.REJECTED,
       'Appointment rejected.',
       actor,
+      reason.trim(),
     );
   }
 
@@ -404,6 +409,14 @@ export class AppointmentsService {
             ? [AppointmentStatus.CONFIRMED]
             : [AppointmentStatus.PENDING];
       this.requireStatus(current, allowed);
+      if (status === AppointmentStatus.CANCELLED) {
+        const creator = current.createdBy?.toString() ?? current.history.find(
+          entry => entry.action === 'Appointment created.',
+        )?.actorId;
+        if (!creator || !Types.ObjectId.isValid(creator) || !sameId(creator, actor.sub)) {
+          throw new ForbiddenException('Only the person who created this appointment may cancel it.');
+        }
+      }
       if (status === AppointmentStatus.CONFIRMED) {
         await this.scheduling.validate(
           this.scheduleRequest(current),

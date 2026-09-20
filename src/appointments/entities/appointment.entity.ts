@@ -54,6 +54,9 @@ export class Appointment {
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true })
   dentist: User;
 
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User', immutable: true })
+  createdBy?: mongoose.Types.ObjectId;
+
   @Prop({
     type: [{ type: mongoose.Schema.Types.ObjectId, ref: DentalCatalog.name }],
   })

@@ -16,6 +16,7 @@ import {
 import { AppointmentsService } from './appointments.service';
 import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
+import { RejectAppointmentDto } from './dto/reject-appointment.dto';
 import { AppointmentChangeReasonDto } from './dto/appointment-change-reason.dto';
 
 @Controller('appointments')
@@ -82,8 +83,12 @@ export class AppointmentsController {
 
   @Patch(':id/reject')
   @HttpCode(HttpStatus.OK)
-  reject(@Param('id') id: string, @User() actor: UserActor) {
-    return this.appointmentsService.reject(id, actor);
+  reject(
+    @Param('id') id: string,
+    @Body(new ValidationPipe()) dto: RejectAppointmentDto,
+    @User() actor: UserActor,
+  ) {
+    return this.appointmentsService.reject(id, actor, dto.reason);
   }
 
   @Patch(':id/complete')

@@ -179,6 +179,56 @@ localTests('Appointment lifecycle', () => {
   const setStatus = async (status: Status) =>
     appointments.updateOne({ _id: fixture.appointment }, { $set: { status } });
 
+  it('records the authenticated creator and ignores forged creator/history in creation and edits', async () => {
+    const forged = { createdBy: fixture.dentist, history: [{ action: 'Appointment created.', actorId: fixture.dentist }] };
+    const created = await service.create({ ...booking(), ...forged }, actor('user'));
+    expect(created.createdBy?.toString()).toBe(fixture.patient);
+    expect(created.history[0].actorId).toBe(fixture.patient);
+    await service.update(created.id, { ...booking(), ...forged }, admin);
+    const stored = await appointments.findById(created.id);
+    expect(stored?.createdBy?.toString()).toBe(fixture.patient);
+    expect(stored?.history[0].actorId).toBe(fixture.patient);
+    await service.reschedule(created.id, { date, startTime: '15:00', endTime: '16:00' }, actor('dentist'));
+    expect((await appointments.findById(created.id))?.createdBy?.toString()).toBe(fixture.patient);
+    await expect(service.cancel(created.id, actor('dentist'))).rejects.toBeInstanceOf(ForbiddenException);
+    await service.cancel(created.id, actor('user'), 'Plans changed');
+  });
+
+  it.each(['user', 'dentist', 'admin', 'super-admin'] as const)('allows only the %s creator to cancel, with no staff override', async role => {
+    const owner = role === 'user' || role === 'dentist' ? actor(role) : { ...admin, role };
+    const created = await service.create(booking(), owner);
+    const nonOwner = role === 'user' ? admin : actor('user');
+    const before = await appointments.findById(created.id).lean();
+    await expect(service.cancel(created.id, nonOwner, 'No permission')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await appointments.findById(created.id).lean()).toEqual(before);
+    const result = await service.cancel(created.id, owner, '  Plans changed  ');
+    expect(result.status).toBe(Status.CANCELLED);
+    expect(result.history.at(-1)).toMatchObject({ reason: 'Plans changed', actorId: owner.sub });
+  });
+
+  it('enforces cancellation ownership at the authenticated HTTP endpoint', async () => {
+    const created = await service.create(booking(), actor('user'));
+    await request(app.getHttpServer()).patch(`/appointments/${created.id}/cancel`)
+      .set('Cookie', 'jwt=dentist').send({ reason: 'Closed', createdBy: fixture.dentist }).expect(403);
+    expect((await appointments.findById(created.id))?.status).toBe(Status.PENDING);
+    await request(app.getHttpServer()).patch(`/appointments/${created.id}/cancel`)
+      .set('Cookie', 'jwt=patient').send({ reason: 'Plans changed' }).expect(200);
+  });
+
+  it('requires a reason before atomically saving rejection and its attributed history', async () => {
+    await setStatus(Status.PENDING);
+    const before = await appointments.findById(fixture.appointment).lean();
+    await request(app.getHttpServer()).patch(`/appointments/${fixture.appointment}/reject`)
+      .set('Cookie', 'jwt=dentist').send({}).expect(400);
+    expect(await appointments.findById(fixture.appointment).lean()).toEqual(before);
+    await request(app.getHttpServer()).patch(`/appointments/${fixture.appointment}/reject`)
+      .set('Cookie', 'jwt=dentist').send({ reason: '  Dentist unavailable  ' }).expect(200);
+    const stored = await appointments.findById(fixture.appointment);
+    expect(stored?.status).toBe(Status.REJECTED);
+    expect(stored?.history).toHaveLength(2);
+    expect(stored?.history.at(-1)).toMatchObject({ reason: 'Dentist unavailable', actorId: fixture.dentist, actorRole: 'dentist' });
+  });
+
   it('blocks terminal rescheduling without changing the slot or history', async () => {
     await setStatus(Status.COMPLETED);
     const before = (await appointments.findById(fixture.appointment).lean())!;
@@ -230,7 +280,7 @@ localTests('Appointment lifecycle', () => {
       const referralBefore = await referrals.findById(fixture.referral).lean();
       const operations = [
         () => service.approve(fixture.appointment, admin),
-        () => service.reject(fixture.appointment, admin),
+        () => service.reject(fixture.appointment, admin, 'Dentist unavailable'),
         () => service.cancel(fixture.appointment, admin),
         () => service.update(fixture.appointment, booking(), admin),
         () => service.reschedule(fixture.appointment, booking(), admin),
@@ -259,7 +309,7 @@ localTests('Appointment lifecycle', () => {
       service.approve(fixture.appointment, admin),
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
-      service.reject(fixture.appointment, admin),
+      service.reject(fixture.appointment, admin, 'Dentist unavailable'),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 

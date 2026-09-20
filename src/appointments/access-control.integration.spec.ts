@@ -272,7 +272,7 @@ localTests('Record access boundaries', () => {
       const calls = {
         update: () => service.update(target, booking(), actor('dentist')),
         approve: () => service.approve(target, actor('dentist')),
-        reject: () => service.reject(target, actor('dentist')),
+        reject: () => service.reject(target, actor('dentist'), 'Dentist unavailable'),
         cancel: () => service.cancel(target, actor('dentist')),
         reschedule: () =>
           service.reschedule(target, booking(), actor('dentist')),
@@ -289,7 +289,7 @@ localTests('Record access boundaries', () => {
       service.approve(fixture.appointment, actor('user')),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await expect(
-      service.reject(fixture.appointment, actor('user')),
+      service.reject(fixture.appointment, actor('user'), 'Dentist unavailable'),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await expect(
       service.updateDentistNotes(fixture.appointment, 'Forged', actor('user')),

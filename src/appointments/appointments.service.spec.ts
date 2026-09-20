@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Referral } from '../referral/entities/referral.entity';
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
@@ -17,6 +18,7 @@ describe('Appointment changes', () => {
 
   beforeEach(async () => {
     current = new AppointmentModel({
+      createdBy: actor.sub,
       clinic: '000000000000000000000001', patient: '000000000000000000000002',
       dentist: '000000000000000000000003', date: new Date('2026-09-15'),
       startTime: '09:00', endTime: '10:00', status: AppointmentStatus.CONFIRMED,
@@ -55,6 +57,38 @@ describe('Appointment changes', () => {
   it('allows cancellation even when another appointment occupies the slot', async () => {
     findOne.mockResolvedValue({});
     await expect(service.cancel(current.id, actor)).resolves.toMatchObject({ status: AppointmentStatus.CANCELLED });
+  });
+
+  it.each([
+    { sub: '000000000000000000000003', role: 'dentist' },
+    { sub: '000000000000000000000004', role: 'admin' },
+    { sub: '000000000000000000000005', role: 'super-admin' },
+  ])('does not let a non-creator $role cancel a patient booking', async other => {
+    await expect(service.cancel(current.id, other, 'Schedule conflict')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(update).not.toHaveBeenCalled();
+    expect(current.status).toBe(AppointmentStatus.CONFIRMED);
+  });
+
+  it('does not let the patient cancel a booking created by staff', async () => {
+    current.set('createdBy', '000000000000000000000004');
+    await expect(service.cancel(current.id, actor)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('uses the original attributed creation event for existing bookings', async () => {
+    current.set('createdBy', undefined);
+    current.set('history', [
+      { action: 'Appointment created.', actorId: actor.sub },
+      { action: 'Appointment approved.', actorId: '000000000000000000000003' },
+    ]);
+    await expect(service.cancel(current.id, actor)).resolves.toMatchObject({ status: AppointmentStatus.CANCELLED });
+  });
+
+  it('does not guess the creator from the patient or later activity', async () => {
+    current.set('createdBy', undefined);
+    current.set('history', [{ action: 'Appointment rescheduled.', actorId: actor.sub }]);
+    await expect(service.cancel(current.id, actor)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('persists a reschedule reason while returning the appointment to pending', async () => {

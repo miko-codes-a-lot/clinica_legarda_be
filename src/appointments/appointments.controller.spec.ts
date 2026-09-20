@@ -9,11 +9,12 @@ describe('Appointment change HTTP contracts', () => {
   let app: INestApplication;
   const actor: UserActor = { sub: '000000000000000000000002', role: 'user' };
   const cancel = jest.fn((id: string, _actor: UserActor, reason?: string) => ({ _id: id, reason }));
+  const reject = jest.fn((id: string, _actor: UserActor, reason: string) => ({ _id: id, reason }));
   const reschedule = jest.fn((id: string, dto: object) => ({ _id: id, ...dto }));
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [AppointmentsController],
-      providers: [{ provide: AppointmentsService, useValue: { cancel, reschedule } }],
+      providers: [{ provide: AppointmentsService, useValue: { cancel, reschedule, reject } }],
     }).compile();
     app = module.createNestApplication();
     app.use((req: { user?: UserActor }, _res: unknown, next: () => void) => {
@@ -24,8 +25,17 @@ describe('Appointment change HTTP contracts', () => {
     await app.init();
   });
   afterAll(() => app.close());
-  beforeEach(() => { cancel.mockClear(); reschedule.mockClear(); });
+  beforeEach(() => { cancel.mockClear(); reschedule.mockClear(); reject.mockClear(); });
 
+  it('passes the required rejection reason to the service', async () => {
+    await request(app.getHttpServer()).patch('/appointments/a1/reject')
+      .send({ reason: 'Dentist unavailable' }).expect(200);
+    expect(reject).toHaveBeenCalledWith('a1', actor, 'Dentist unavailable');
+  });
+  it.each([undefined, '', '   ', null, 17, 'x'.repeat(501)])('requires a meaningful rejection reason: %p', async reason => {
+    await request(app.getHttpServer()).patch('/appointments/a1/reject').send({ reason }).expect(400);
+    expect(reject).not.toHaveBeenCalled();
+  });
   it('passes a cancellation reason through the HTTP endpoint', async () => {
     await request(app.getHttpServer()).patch('/appointments/a1/cancel')
       .send({ reason: 'Work conflict' }).expect(200).expect({ _id: 'a1', reason: 'Work conflict' });
