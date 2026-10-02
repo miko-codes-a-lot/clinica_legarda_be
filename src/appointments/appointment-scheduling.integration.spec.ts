@@ -56,7 +56,7 @@ localTests('Appointment scheduling persistence', () => {
       { name: 'Fixture B', operatingHours: hours },
     ]);
     const dentist = await users.create({ role: 'dentist', status: 'confirmed', clinics: places.map(c => c._id), operatingHours: hours });
-    const patients = await users.create([{ role: 'user' }, { role: 'user' }]);
+    const patients = await users.create([{ role: 'user', status: 'confirmed' }, { role: 'user', status: 'confirmed' }]);
     fixture = { dentist: dentist.id, patient: patients[0].id, otherPatient: patients[1].id, clinic: places[0].id, otherClinic: places[1].id };
   });
   afterAll(async () => { await connection?.close(); await competingConnection?.close(); });

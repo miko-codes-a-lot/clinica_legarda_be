@@ -78,6 +78,9 @@ export class Appointment {
   })
   status: AppointmentStatus;
 
+  @Prop({ default: false })
+  isWalkIn: boolean;
+
   @Prop({ type: AppointmentNote, default: () => ({}) })
   notes: AppointmentNote;
 

@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { assignedClinicIds } from '../users/clinic-membership';
 import { UserActor } from './role-policy';
 import { referenceId } from './record-policy';
+import { UserStatus } from '../_shared/enum/user-status.enum';
 
 const OTP_SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -48,10 +49,11 @@ export class AuthService {
       throw new BadRequestException('Username or password is incorrect');
 
     user.password = undefined;
+    this.requireActivePatient(user);
 
     // Check if OTP was verified within the last 24 hours
     const otpStillValid =
-      user.otpVerifiedAt &&
+      (user.role !== 'user' || user.status === UserStatus.CONFIRMED) && user.otpVerifiedAt &&
       Date.now() - new Date(user.otpVerifiedAt).getTime() <
         OTP_SESSION_DURATION_MS;
 
@@ -71,11 +73,11 @@ export class AuthService {
     // OTP required — send code and issue partial token
     if (!user.emailAddress) {
       throw new BadRequestException(
-        'No email address on file. Cannot send OTP.',
+        'Ask the clinic to add your email address before signing in for online booking.',
       );
     }
 
-    const otpCode = await this.otpService.generate(user._id.toString());
+    const otpCode = await this.otpService.generate(user._id.toString(), user.emailAddress);
     await this.mailerService.sendOtp(user.emailAddress, otpCode);
 
     const partialPayload = {
@@ -92,6 +94,7 @@ export class AuthService {
   async resendOtp(userId: string) {
     const user = await this.userService.findForAuthentication(userId);
     if (!user) throw new BadRequestException('User not found');
+    this.requireActivePatient(user);
 
     if (!user.emailAddress) {
       throw new BadRequestException(
@@ -99,17 +102,16 @@ export class AuthService {
       );
     }
 
-    const otpCode = await this.otpService.generate(userId);
+    const otpCode = await this.otpService.generate(userId, user.emailAddress);
     await this.mailerService.sendOtp(user.emailAddress, otpCode);
   }
 
   async verifyOtp(userId: string, code: string) {
-    await this.otpService.verify(userId, code);
-
-    const user = await this.userService.findForAuthentication(userId);
-    if (!user) throw new BadRequestException('User not found');
-
-    await this.userService.updateOtpVerifiedAt(userId);
+    const current = await this.userService.findForAuthentication(userId);
+    if (!current) throw new BadRequestException('User not found');
+    this.requireActivePatient(current);
+    await this.otpService.verify(userId, code, current.emailAddress);
+    const user = await this.userService.completeEmailVerification(current);
     await this.otpService.deleteForUser(userId);
 
     const payload = {
@@ -121,6 +123,12 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync(payload);
 
     return { user, accessToken };
+  }
+
+  private requireActivePatient(user: { role: string; status: UserStatus }) {
+    if (user.role === 'user' && user.status === UserStatus.REJECTED) {
+      throw new BadRequestException('This patient account is rejected. Contact the clinic.');
+    }
   }
 
   // 1. Generate reset OTP and send via SMS

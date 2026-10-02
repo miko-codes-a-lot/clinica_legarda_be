@@ -102,6 +102,29 @@ describe('User membership writes and profile authorization', () => {
     id: string | undefined = dentistId,
   ) => service.upsert(doc, id, actor);
 
+  it.each(['', 'jamie@example.test'])('preserves a newly verified email when a delayed profile save echoed %s', async email => {
+    stored.role = 'user';
+    stored.status = UserStatus.WALK_IN;
+    stored.isWalkIn = true;
+    stored.set('emailAddress', email || undefined);
+    const verifiedAt = new Date();
+    beforeWrite = () => stored.set({ emailAddress: 'new@example.test', status: UserStatus.CONFIRMED, otpVerifiedAt: verifiedAt });
+    await save(service, form({ role: 'user', isWalkIn: true, emailAddress: email }), superAdmin);
+    expect(stored.emailAddress).toBe('new@example.test');
+    expect(stored.status).toBe(UserStatus.CONFIRMED);
+    expect(stored.otpVerifiedAt).toEqual(verifiedAt);
+  });
+
+  it('rejects a patient email edit when a concurrent role change would receive patient-only status', async () => {
+    stored.role = 'user';
+    stored.isWalkIn = true;
+    beforeWrite = () => stored.set({ role: 'dentist', isWalkIn: false });
+    await expect(save(service, form({ role: 'user', isWalkIn: true, emailAddress: 'changed@example.test' }), { sub: dentistId, role: 'user' }))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(stored.role).toBe('dentist');
+    expect(stored.status).toBe(UserStatus.CONFIRMED);
+  });
+
   it('persists two memberships, normalizes duplicates and retains the first legacy clinic', async () => {
     await save(service, form({ clinics: [clinicA, clinicB, clinicA] }));
     expect(stored.toObject()).toMatchObject({

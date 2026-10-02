@@ -121,8 +121,8 @@ localTests('Record access boundaries', () => {
       { name: 'Access B', operatingHours: hours },
     ]);
     const people = await users.create([
-      { role: 'user', firstName: 'Own', emailAddress: 'own@example.test' },
-      { role: 'user', firstName: 'Other', emailAddress: 'other@example.test' },
+      { role: 'user', status: 'confirmed', firstName: 'Own', emailAddress: 'own@example.test' },
+      { role: 'user', status: 'confirmed', firstName: 'Other', emailAddress: 'other@example.test' },
       {
         role: 'dentist',
         firstName: 'Doctor',

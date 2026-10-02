@@ -14,6 +14,11 @@ export class Otp {
 
   @Prop({ required: true })
   code: string;
+
+  @Prop()
+  recipientEmail: string;
+
+  createdAt: Date;
 }
 
 export const OtpSchema = SchemaFactory.createForClass(Otp);

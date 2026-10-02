@@ -246,6 +246,7 @@ export class UsersService {
       if (
         (doc.role !== undefined && doc.role !== existing.role) ||
         (doc.status !== undefined && doc.status !== existing.status) ||
+        (doc.isWalkIn !== undefined && doc.isWalkIn !== (existing.isWalkIn ?? false)) ||
         (doc.clinic !== undefined &&
           referenceId(doc.clinic) !== assigned[0]?.toLowerCase()) ||
         (requested !== undefined &&
@@ -271,6 +272,25 @@ export class UsersService {
         update.role = doc.role;
       }
       if (doc.status !== undefined) update.status = doc.status;
+      const patientRole = doc.role ?? existing?.role;
+      const walkIn = doc.isWalkIn ?? existing?.isWalkIn ?? false;
+      if (patientRole !== 'user' && (doc.isWalkIn === true || doc.status === UserStatus.WALK_IN)) {
+        throw new BadRequestException('Walk-in registration is only available for patients.');
+      }
+      if (doc.status === UserStatus.WALK_IN && !walkIn) {
+        throw new BadRequestException('Walk-in status requires staff walk-in registration.');
+      }
+      if (patientRole === 'user') {
+        update.isWalkIn = walkIn;
+        if (walkIn && (!existing || (doc.isWalkIn === true && !existing.isWalkIn && existing.status === UserStatus.PENDING))) {
+          update.status = UserStatus.WALK_IN;
+        } else if (!walkIn && existing?.status === UserStatus.WALK_IN) {
+          update.status = UserStatus.PENDING;
+        }
+      } else {
+        update.isWalkIn = false;
+        if (existing?.status === UserStatus.WALK_IN) update.status = UserStatus.PENDING;
+      }
       if (
         doc.clinic !== undefined &&
         (typeof doc.clinic !== 'string' ||
@@ -347,6 +367,21 @@ export class UsersService {
         update.clinic = adminClinicIds(actor)[0];
       }
     }
+    if (existing && doc.emailAddress !== undefined && doc.emailAddress === (existing.emailAddress ?? '')) {
+      // Profile forms echo contacts. Do not overwrite a newer verified email.
+      delete update.emailAddress;
+    }
+    if (existing && doc.emailAddress !== undefined && doc.emailAddress !== (existing.emailAddress ?? '')) {
+      update.otpVerifiedAt = null;
+      const role = update.role ?? existing.role;
+      if (role === 'user' && (update.status ?? existing.status) === UserStatus.CONFIRMED) {
+        update.status = (update.isWalkIn ?? existing.isWalkIn) ? UserStatus.WALK_IN : UserStatus.PENDING;
+      }
+      // A verification that races a profile write must not restore old proof.
+      writeCondition.emailAddress = existing.emailAddress ?? { $exists: false };
+      writeCondition.status = existing.status;
+      writeCondition.role = existing.role;
+    }
     const saved = await this.persist(update, id, writeCondition);
     return saved ? this.visibleUser(saved, actor) : saved;
   }
@@ -359,6 +394,9 @@ export class UsersService {
 
   /** Public registration has an explicit, nonprivileged write path. */
   registerPatient(doc: UserUpsertDto) {
+    if (doc.isWalkIn || doc.status === UserStatus.WALK_IN) {
+      throw new ForbiddenException('Only clinic administrators may register walk-in patients.');
+    }
     return this.persist({
       ...this.profileFields(doc),
       role: 'user',
@@ -410,41 +448,42 @@ export class UsersService {
       delete doc.password;
     }
 
-    const dup = await this.userModel.findOne({
+    const uniqueFields = ['username', 'emailAddress', 'mobileNumber'].filter(field => typeof doc[field] === 'string' && !!doc[field]);
+    const dup = uniqueFields.length ? await this.userModel.findOne({
       ...(id && { _id: { $ne: id } }),
-      $or: [
-        { username: doc.username },
-        { emailAddress: doc.emailAddress },
-        { mobileNumber: doc.mobileNumber },
-      ],
-    });
+      $or: uniqueFields.map(field => ({ [field]: doc[field] })),
+    }) : null;
     if (dup) {
-      if (dup.username === doc.username) {
+      if (doc.username && dup.username === doc.username) {
         throw new BadRequestException(
           `Username is already taken: "${doc.username}"`,
         );
       }
 
-      if (dup.emailAddress === doc.emailAddress) {
+      if (doc.emailAddress && dup.emailAddress === doc.emailAddress) {
         throw new BadRequestException(
           `Email address already exists: "${doc.emailAddress}"`,
         );
       }
 
-      if (dup.mobileNumber === doc.mobileNumber) {
+      if (doc.mobileNumber && dup.mobileNumber === doc.mobileNumber) {
         throw new BadRequestException(
           `Mobile number already exists: "${doc.mobileNumber}"`,
         );
       }
     }
 
+    const unset: Record<string, number> = {};
+    for (const field of ['emailAddress', 'mobileNumber', 'otpVerifiedAt']) {
+      if (doc[field] === '' || doc[field] === null) { unset[field] = 1; delete doc[field]; }
+    }
+    if (Array.isArray(doc.clinics) && doc.clinics.length === 0) unset.clinic = 1;
     const saved = await this.userModel
       .findOneAndUpdate(
         { _id: id || new mongoose.Types.ObjectId(), ...writeCondition },
         {
           $set: doc,
-          ...(Array.isArray(doc.clinics) &&
-            doc.clinics.length === 0 && { $unset: { clinic: 1 } }),
+          ...(Object.keys(unset).length && { $unset: unset }),
         },
         { upsert: !id, new: true, runValidators: true },
       )
@@ -483,11 +522,15 @@ export class UsersService {
     };
   }
 
-  updateOtpVerifiedAt(userId: string) {
-    return this.userModel.findByIdAndUpdate(
-      userId,
-      { $set: { otpVerifiedAt: new Date() } },
+  async completeEmailVerification(user: User) {
+    const status = user.role === 'user' && [UserStatus.PENDING, UserStatus.WALK_IN].includes(user.status)
+      ? UserStatus.CONFIRMED : user.status;
+    const verified = await this.userModel.findOneAndUpdate(
+      { _id: user._id, emailAddress: user.emailAddress, role: user.role, status: user.status },
+      { $set: { otpVerifiedAt: new Date(), status } },
       { new: true },
-    );
+    ).populate('clinic clinics');
+    if (!verified) throw new ConflictException('Account details changed. Sign in again to verify your current email.');
+    return verified;
   }
 }

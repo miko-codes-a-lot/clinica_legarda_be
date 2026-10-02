@@ -117,7 +117,7 @@ localTests('Appointment lifecycle', () => {
       operatingHours: hours,
     });
     const people = await users.create([
-      { role: 'user', firstName: 'Patient' },
+      { role: 'user', status: 'confirmed', firstName: 'Patient' },
       {
         role: 'dentist',
         firstName: 'Doctor',

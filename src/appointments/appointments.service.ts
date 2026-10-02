@@ -36,6 +36,7 @@ import {
   DENTIST_DIRECTORY_FIELDS,
 } from '../users/user-projections';
 import { calendarDay, ScheduleRequest } from './appointment-scheduling.rules';
+import { patientBookingStatuses } from '../users/patient-booking-policy';
 
 @Injectable()
 export class AppointmentsService {
@@ -65,6 +66,7 @@ export class AppointmentsService {
     const id = await this.scheduling.withLocks(
       [request.dentist, request.patient],
       async (session) => {
+        await this.requireBookablePatient(request.patient, actor, session);
         const validated = await this.scheduling.validate(request, session);
         const referral = await this.validateReferral(
           dto.referral,
@@ -165,6 +167,15 @@ export class AppointmentsService {
     if (!history) throw new ForbiddenException('This patient is outside your assigned clinics.');
   }
 
+  private async requireBookablePatient(patient: string, actor: UserActor, session: ClientSession) {
+    const eligible = await this.userModel.exists({
+      _id: referenceId(patient), role: 'user', status: { $in: patientBookingStatuses(actor.role) },
+    }).session(session);
+    if (eligible) return;
+    if (actor.role === 'user') throw new ForbiddenException('Verify your patient account before booking online. Sign in again and complete the email OTP.');
+    throw new BadRequestException('Select a confirmed or staff-registered walk-in patient.');
+  }
+
   private populate<
     T extends {
       populate: (options: import('mongoose').PopulateOptions[]) => T;
@@ -206,6 +217,7 @@ export class AppointmentsService {
           );
         }
         const request = this.writeFields(dto, actor, current);
+        await this.requireBookablePatient(request.patient, actor, session);
         const referral = await this.validateReferral(
           dto.referral === undefined
             ? current.referral?.toString()
@@ -297,6 +309,7 @@ export class AppointmentsService {
         startTime: dto.startTime,
         endTime: dto.endTime,
       };
+      await this.requireBookablePatient(request.patient, actor, session);
       const validated = await this.scheduling.validate(request, session, id);
       await this.writeCurrent(
         current,
@@ -505,7 +518,11 @@ export class AppointmentsService {
     current?: Appointment,
   ) {
     const clinical = isAdmin(actor) || actor.role === 'dentist';
+    if (!clinical && dto.isWalkIn !== undefined && dto.isWalkIn !== (current?.isWalkIn ?? false)) {
+      throw new ForbiddenException('Only clinic staff may mark a visit as walk-in.');
+    }
     return {
+      isWalkIn: clinical ? dto.isWalkIn ?? current?.isWalkIn ?? false : current?.isWalkIn ?? false,
       clinic: dto.clinic,
       patient: actor.role === 'user' ? referenceId(actor.sub) : dto.patient,
       dentist: dto.dentist,

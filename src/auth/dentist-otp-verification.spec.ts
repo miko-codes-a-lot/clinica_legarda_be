@@ -15,17 +15,18 @@ it('email OTP verification verifies login without approving the dentist for book
     username: 'test-dentist',
     role: 'dentist',
     status: UserStatus.PENDING,
+    emailAddress: 'dentist@example.test',
     clinics: ['64a000000000000000000001'],
     otpVerifiedAt: undefined as Date | undefined,
   };
   const userModel = {
     findById: () => ({ populate: () => Promise.resolve(stored) }),
-    findByIdAndUpdate: (
-      _id: string,
+    findOneAndUpdate: (
+      _filter: unknown,
       update: { $set: Record<string, unknown> },
     ) => {
       Object.assign(stored, update.$set);
-      return Promise.resolve(stored);
+      return { populate: () => Promise.resolve(stored) };
     },
   };
   const users = new UsersService(
@@ -48,7 +49,7 @@ it('email OTP verification verifies login without approving the dentist for book
 
   const result = await auth.verifyOtp(stored._id, '123456');
 
-  expect(verify).toHaveBeenCalledWith(stored._id, '123456');
+  expect(verify).toHaveBeenCalledWith(stored._id, '123456', stored.emailAddress);
   expect(stored.otpVerifiedAt).toBeInstanceOf(Date);
   expect(stored.status).toBe(UserStatus.PENDING);
   expect(stored.clinics).toEqual(['64a000000000000000000001']);

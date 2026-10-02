@@ -8,6 +8,7 @@ import {
   IsString,
   Matches,
   ValidateNested,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AppointmentStatus } from 'src/_shared/enum/appointment-status.enum';
@@ -23,6 +24,10 @@ class AppointmentNoteDto {
 }
 
 export class AppointmentUpsertDto {
+  @IsOptional()
+  @IsBoolean()
+  isWalkIn?: boolean;
+
   @IsNotEmpty()
   @IsMongoId()
   clinic: string;

@@ -38,7 +38,7 @@ export class MailerService {
           <tr>
             <td style="background-color: #ffffff; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
               <h2 style="margin: 0 0 8px; color: #333333; font-size: 20px; font-weight: 600;">Login Verification</h2>
-              <p style="margin: 0 0 24px; color: #666666; font-size: 14px; line-height: 1.5;">Use the code below to verify your identity. This code is valid for <strong>5 minutes</strong>.</p>
+              <p style="margin: 0 0 24px; color: #666666; font-size: 14px; line-height: 1.5;">Use the code below to verify your identity. This code is valid for <strong>10 minutes</strong>.</p>
               <!-- OTP Code Box -->
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>

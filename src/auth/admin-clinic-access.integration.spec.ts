@@ -103,8 +103,8 @@ isolated('Admin clinic access through the authenticated API', () => {
       { username: 'super', role: 'super-admin' },
       { username: 'doctor-ab', emailAddress: 'learning@example.test', mobileNumber: '+639171112101', role: 'dentist', clinics: places.map(place => place._id), status: 'confirmed' },
       { username: 'doctor-b', role: 'dentist', clinics: [places[1]._id], status: 'confirmed' },
-      { username: 'patient-ab', role: 'user', firstName: 'Visible', emailAddress: 'visible@example.test' },
-      { username: 'patient-b', role: 'user', firstName: 'Outside', emailAddress: 'outside@example.test' },
+      { username: 'patient-ab', role: 'user', status: 'confirmed', firstName: 'Visible', emailAddress: 'visible@example.test' },
+      { username: 'patient-b', role: 'user', status: 'confirmed', firstName: 'Outside', emailAddress: 'outside@example.test' },
     ]);
     const records = await appointments.create([
       { clinic: places[0]._id, dentist: people[3]._id, patient: people[5]._id, date: today, startTime: '09:00', endTime: '10:00', status: 'confirmed', notes: { clinicNotes: 'Assigned notes' } },

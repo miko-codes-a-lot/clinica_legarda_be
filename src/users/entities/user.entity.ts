@@ -71,6 +71,9 @@ export class User {
   @Prop({ enum: UserStatus, default: UserStatus.PENDING })
   status: UserStatus;
 
+  @Prop({ default: false })
+  isWalkIn: boolean;
+
   // DAILY CAPACITY
   @Prop({ default: 480 })
   maxWorkingMinutesPerDay: number;

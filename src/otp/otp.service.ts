@@ -11,7 +11,7 @@ export class OtpService {
     @InjectModel(Otp.name) private readonly otpModel: Model<Otp>,
   ) {}
 
-  async generate(userId: string): Promise<string> {
+  async generate(userId: string, recipientEmail: string): Promise<string> {
     await this.otpModel.deleteMany({ user: userId });
 
     const code = crypto.randomInt(100000, 999999).toString();
@@ -20,15 +20,17 @@ export class OtpService {
     await this.otpModel.create({
       user: userId,
       code: hashedCode,
+      recipientEmail,
     });
 
     return code;
   }
 
-  async verify(userId: string, code: string): Promise<boolean> {
+  async verify(userId: string, code: string, recipientEmail: string): Promise<boolean> {
     const otpRecord = await this.otpModel.findOne({ user: userId });
 
-    if (!otpRecord) {
+    if (!recipientEmail || !otpRecord || otpRecord.recipientEmail !== recipientEmail ||
+      !otpRecord.createdAt || Date.now() - new Date(otpRecord.createdAt).getTime() >= 600_000) {
       throw new BadRequestException('OTP has expired or does not exist');
     }
 

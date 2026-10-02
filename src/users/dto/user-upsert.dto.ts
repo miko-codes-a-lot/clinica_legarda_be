@@ -10,6 +10,9 @@ import {
   IsEnum,
   IsStrongPassword,
   IsIn,
+  IsBoolean,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 import { OperatingHourDto } from 'src/_shared/dto/operating-hour.dto';
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
@@ -39,12 +42,19 @@ export class UserUpsertDto {
   })
   password?: string;
 
+  @ValidateIf((doc: UserUpsertDto) => !doc.isWalkIn || !!doc.emailAddress)
   @IsNotEmpty()
   @IsEmail()
   emailAddress: string;
 
+  @ValidateIf((doc: UserUpsertDto) => !doc.isWalkIn || !!doc.mobileNumber)
   @IsNotEmpty()
+  @Matches(/^\+639\d{9}$/)
   mobileNumber: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isWalkIn?: boolean;
 
   @IsNotEmpty()
   address: string;
