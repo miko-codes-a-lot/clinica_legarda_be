@@ -17,6 +17,7 @@ import { ReferralsModule } from './referral/referrals.module';
 import { ReasonModule } from './reason/reason.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { join } from 'path';
+import { CareModule } from './care/care.module';
 
 @Module({
   imports: [
@@ -43,7 +44,8 @@ import { join } from 'path';
     AnalyticsModule,
     ReferralsModule,
     ReasonModule,
-    ChatbotModule
+    ChatbotModule,
+    CareModule,
   ],
   controllers: [AppController],
   providers: [AppService],
