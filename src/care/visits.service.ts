@@ -1,3 +1,5 @@
+import { ClinicClosure } from '../clinic-closures/entities/clinic-closure.entity';
+import { assertOpenInterval } from '../clinic-closures/closure-rules';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model } from 'mongoose';
@@ -26,6 +28,7 @@ export class VisitsService implements OnModuleInit {
     @InjectModel(Clinic.name) private readonly clinics: Model<Clinic>,
     @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
     @InjectModel(TreatmentCase.name) private readonly cases?: Model<TreatmentCase>,
+    @InjectModel(ClinicClosure.name) private readonly closures?: Model<ClinicClosure>,
   ) {}
   async onModuleInit() { await this.visits.init(); }
 
@@ -44,6 +47,9 @@ export class VisitsService implements OnModuleInit {
         assertIntakePatient(patient.status);
         const dentist = await this.users.exists({ _id: dentistId, role: 'dentist', status: 'confirmed', ...clinicMembershipFilter(clinicId) }).session(session);
         if (!dentist) throw new BadRequestException('Select a confirmed dentist assigned to this clinic.');
+        const closed = this.closures ? await this.closures.find({ clinic: clinicId, status: 'active' }).session(session) : [];
+        const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+        assertOpenInterval(closed, day, time, `${time}:59`);
         let walkIn = dto.isWalkIn ?? !dto.appointment;
         let caseId = dto.careCase ? referenceId(dto.careCase) : undefined;
         if (dto.appointment) {
@@ -52,6 +58,7 @@ export class VisitsService implements OnModuleInit {
           if (!sameId(appointment.patient, patientId) || !sameId(appointment.clinic, clinicId) || !sameId(appointment.dentist, dentistId))
             throw new BadRequestException('The appointment must belong to this patient, clinic and dentist.');
           assertAppointmentCheckIn(appointment, day);
+          assertOpenInterval(closed, day, appointment.startTime, appointment.endTime);
           if (appointment.careCase) {
             if (caseId && !sameId(caseId, appointment.careCase)) throw new BadRequestException('The visit must use its appointment treatment case.');
             caseId = referenceId(appointment.careCase);

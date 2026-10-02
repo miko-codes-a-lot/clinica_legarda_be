@@ -1,3 +1,4 @@
+import { ClinicClosuresModule } from './clinic-closures/clinic-closures.module';
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -48,6 +49,7 @@ import { CareModule } from './care/care.module';
     ChatbotModule,
     CareModule,
     LedgerModule,
+    ClinicClosuresModule,
   ],
   controllers: [AppController],
   providers: [AppService],

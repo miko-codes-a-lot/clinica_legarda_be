@@ -1,3 +1,5 @@
+import { ClinicClosure } from '../clinic-closures/entities/clinic-closure.entity';
+import { assertOpenInterval } from '../clinic-closures/closure-rules';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
@@ -23,6 +25,7 @@ export class AppointmentSchedulingService {
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Clinic.name) private readonly clinics: Model<Clinic>,
     @InjectModel(DentalCatalog.name) private readonly services: Model<DentalCatalog>,
+    @InjectModel(ClinicClosure.name) private readonly closures?: Model<ClinicClosure>,
   ) {}
 
   async withLocks<T>(userIds: string[], work: (session: ClientSession) => Promise<T>): Promise<T> {
@@ -51,6 +54,9 @@ export class AppointmentSchedulingService {
       clinic: schedulingReferenceId(input.clinic),
       services: [...new Set(input.services.map(schedulingReferenceId))],
     };
+    const locked = await this.clinics.updateOne({ _id: request.clinic }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
+    if (!locked.matchedCount) throw new BadRequestException('Clinic no longer exists');
+    if (this.closures) assertOpenInterval(await this.closures.find({ clinic: request.clinic, status: 'active' }).session(session), calendarDay(request.date).toISOString().slice(0,10), request.startTime, request.endTime);
     const dentist = await this.users.findById(request.dentist).session(session).exec();
     const clinic = await this.clinics.findById(request.clinic).session(session).exec();
     if (!dentist || !clinic) throw new BadRequestException('Invalid dentist or clinic selected');

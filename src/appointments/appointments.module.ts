@@ -1,3 +1,4 @@
+import { ClinicClosure, ClinicClosureSchema } from '../clinic-closures/entities/clinic-closure.entity';
 import { Referral, ReferralSchema } from '../referral/entities/referral.entity';
 import { AppointmentSchedulingService } from './appointment-scheduling.service';
 import { Clinic, ClinicSchema } from '../clinics/entities/clinic.entity';
@@ -22,6 +23,7 @@ import { TreatmentCase, TreatmentCaseSchema } from '../care/entities/treatment-c
       { name: User.name, schema: UserSchema }, // ✅ ADD
       { name: DentalCatalog.name, schema: DentalCatalogSchema },
       { name: Clinic.name, schema: ClinicSchema },
+      { name: ClinicClosure.name, schema: ClinicClosureSchema },
       { name: Visit.name, schema: VisitSchema },
       { name: TreatmentCase.name, schema: TreatmentCaseSchema },
     ]),

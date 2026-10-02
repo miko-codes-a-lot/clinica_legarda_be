@@ -38,6 +38,13 @@ export class AppointmentNote {
   clinicNotes: string;
 }
 
+@Schema({ _id: false })
+export class AppointmentDisruption {
+  @Prop({ type: [mongoose.Schema.Types.ObjectId], ref: 'ClinicClosure', required: true }) closures: mongoose.Types.ObjectId[];
+  @Prop({ required: true }) flaggedAt: Date;
+  @Prop({ required: true }) message: string;
+}
+
 export type AppointmentDocument = HydratedDocument<Appointment>;
 
 @Schema({
@@ -83,6 +90,9 @@ export class Appointment {
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'TreatmentCase' })
   careCase?: mongoose.Types.ObjectId;
+
+  @Prop({ type: AppointmentDisruption })
+  disruption?: AppointmentDisruption;
 
   @Prop({ type: AppointmentNote, default: () => ({}) })
   notes: AppointmentNote;

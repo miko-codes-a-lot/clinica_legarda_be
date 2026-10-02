@@ -240,6 +240,7 @@ export class AppointmentsService {
           current,
           {
             $set: { ...request, ...validated, referral: referral || null },
+            $unset: { disruption: 1 },
             $push: {
               history: this.historyEntry('Appointment details updated.', actor),
             },
@@ -330,6 +331,7 @@ export class AppointmentsService {
             endTime: validated.endTime,
             status: AppointmentStatus.PENDING,
           },
+          $unset: { disruption: 1 },
           $push: {
             history: this.historyEntry(
               'Appointment rescheduled.',

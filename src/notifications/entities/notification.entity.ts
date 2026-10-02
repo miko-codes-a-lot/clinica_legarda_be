@@ -3,6 +3,7 @@ import mongoose, { HydratedDocument } from 'mongoose';
 import { User } from 'src/users/entities/user.entity';
 
 export enum NotificationType {
+  CLINIC_CLOSURE = 'CLINIC_CLOSURE',
   APPOINTMENT_CREATED = 'APPOINTMENT_CREATED',
   APPOINTMENT_STATUS_UPDATED = 'APPOINTMENT_STATUS_UPDATED',
   APPOINTMENT_REMINDER = 'APPOINTMENT_REMINDER',
