@@ -14,6 +14,7 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { isAdmin, UserActor } from '../auth/role-policy';
 import { referenceId, sameId } from '../auth/record-policy';
 import { APPOINTMENT_PERSON_FIELDS } from '../users/user-projections';
+import { adminClinicIds, adminClinicScope, assertClinicAccess, canAccessClinic } from '../auth/clinic-policy';
 
 @Injectable()
 export class ReferralsService {
@@ -52,7 +53,11 @@ export class ReferralsService {
   }
 
   private async scope(actor: UserActor) {
-    if (isAdmin(actor)) return {};
+    if (actor?.role === 'super-admin') return {};
+    if (actor?.role === 'admin') return { $or: [
+      { fromClinicId: { $in: adminClinicIds(actor) } },
+      { _id: { $in: await this.appointmentModel.distinct('referral', adminClinicScope(actor)) } },
+    ] };
     if (actor?.role !== 'dentist' && actor?.role !== 'user')
       throw new ForbiddenException('You cannot access referrals.');
     const linked = await this.appointmentModel.distinct('referral', {
@@ -78,7 +83,13 @@ export class ReferralsService {
     const appointment = await this.appointmentModel
       .findOne({ referral: referral._id })
       .exec();
-    if (isAdmin(actor)) return { referral, appointment };
+    if (actor?.role === 'super-admin') return { referral, appointment };
+    if (actor?.role === 'admin') {
+      const source = canAccessClinic(actor, referral.fromClinicId);
+      const receiving = appointment && canAccessClinic(actor, appointment.clinic);
+      if ((source || receiving) && (!decision || !appointment || receiving)) return { referral, appointment };
+      throw new ForbiddenException('This referral is outside your assigned clinics.');
+    }
     if (
       actor?.role === 'dentist' &&
       (sameId(actor.sub, referral.fromDoctorId) ||
@@ -104,7 +115,7 @@ export class ReferralsService {
       { path: 'fromClinicId' },
     ]);
     // A source dentist can see receiving booking context, not the receiving clinician's chart/history.
-    const linked = appointment
+    const linked = appointment && (actor.role !== 'admin' || canAccessClinic(actor, appointment.clinic))
       ? await this.appointmentModel
           .findById(appointment._id)
           .select(
@@ -164,6 +175,7 @@ export class ReferralsService {
       throw new ForbiddenException('You cannot create referrals.');
     const sourceDentist = referenceId(doc.fromDoctorId);
     const sourceClinic = referenceId(doc.fromClinicId);
+    assertClinicAccess(actor, sourceClinic);
     if (actor.role === 'dentist' && !sameId(sourceDentist, actor.sub))
       throw new ForbiddenException(
         'Dentists may only send their own referrals.',

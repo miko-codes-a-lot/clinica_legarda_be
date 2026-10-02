@@ -36,7 +36,7 @@ localTests('Scoped appointment reports', () => {
     cleaning: new Types.ObjectId(),
     filling: new Types.ObjectId(),
   };
-  const admin = { sub: ids.patient.toHexString(), role: 'admin' };
+  const admin = { sub: ids.patient.toHexString(), role: 'super-admin' };
   const dentist = { sub: ids.dentistA.toHexString(), role: 'dentist' };
   const patient = { sub: ids.patient.toHexString(), role: 'user' };
 
@@ -62,6 +62,7 @@ localTests('Scoped appointment reports', () => {
         {
           provide: AuthService,
           useValue: {
+            resolveActor: async (actor) => actor,
             verifyJwt: async (token: string) => {
               if (token === 'admin') return admin;
               if (token === 'dentist') return dentist;

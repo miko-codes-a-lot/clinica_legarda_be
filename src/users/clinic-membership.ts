@@ -27,11 +27,12 @@ export function assignedClinicIds(user: ClinicMembership): string[] {
 }
 
 /** Mongo equivalent of assignedClinicIds, including absent-only legacy fallback. */
-export function clinicMembershipFilter(clinicId: string) {
+export function clinicMembershipFilter(clinicId: string | readonly string[]) {
+  const match = typeof clinicId === 'string' ? clinicId : { $in: [...clinicId] };
   return {
     $or: [
-      { clinics: clinicId },
-      { clinics: { $exists: false }, clinic: clinicId },
+      { clinics: match },
+      { clinics: { $exists: false }, clinic: match },
     ],
   };
 }

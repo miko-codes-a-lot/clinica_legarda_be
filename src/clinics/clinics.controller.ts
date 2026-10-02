@@ -26,9 +26,15 @@ export class ClinicsController {
   }
 
   @HttpCode(HttpStatus.OK)
+  @Get('accessible')
+  accessible(@User() actor: UserDto) {
+    return this.clinicsService.findAccessible(actor);
+  }
+
+  @HttpCode(HttpStatus.OK)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.clinicsService.findOne(id);
+  findOne(@Param('id') id: string, @User() actor: UserDto) {
+    return this.clinicsService.findOne(id, actor);
   }
 
   @HttpCode(HttpStatus.CREATED)

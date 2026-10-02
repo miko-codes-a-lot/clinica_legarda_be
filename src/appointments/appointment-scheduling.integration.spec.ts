@@ -22,7 +22,7 @@ localTests('Appointment scheduling persistence', () => {
   let catalog: Model<DentalCatalog>;
   let service: AppointmentsService;
   let fixture: { dentist: string; patient: string; otherPatient: string; clinic: string; otherClinic: string };
-  const actor = { sub: '64b000000000000000000099', role: 'admin' };
+  const actor = { sub: '64b000000000000000000099', role: 'super-admin' };
   const hours = [{ day: 'monday', startTime: '08:00', endTime: '18:00' }];
   const date = new Date('2026-09-21T00:00:00.000Z');
 
@@ -38,13 +38,13 @@ localTests('Appointment scheduling persistence', () => {
     await appointments.init();
     await users.init();
     await clinics.init();
-    service = new AppointmentsService(appointments, new AppointmentSchedulingService(appointments, users, clinics, catalog), connection.model(Referral.name, ReferralSchema));
+    service = new AppointmentsService(appointments, new AppointmentSchedulingService(appointments, users, clinics, catalog), connection.model(Referral.name, ReferralSchema), users);
     competingConnection = await createConnection(uri).asPromise();
     const otherAppointments = competingConnection.model(Appointment.name, AppointmentSchema);
     competingService = new AppointmentsService(otherAppointments, new AppointmentSchedulingService(
       otherAppointments, competingConnection.model(User.name, UserSchema),
       competingConnection.model(Clinic.name, ClinicSchema), competingConnection.model(DentalCatalog.name, DentalCatalogSchema),
-    ), competingConnection.model(Referral.name, ReferralSchema));
+    ), competingConnection.model(Referral.name, ReferralSchema), competingConnection.model<User>(User.name));
   });
   beforeEach(async () => {
     await appointments.deleteMany({});
@@ -80,7 +80,7 @@ localTests('Appointment scheduling persistence', () => {
       { ...fixture, clinic: fixture.otherClinic, date, startTime: '11:00', endTime: '12:00', status: 'confirmed' },
       { ...fixture, date, startTime: '13:00', endTime: '14:00', status: 'cancelled' },
     ]);
-    const slots = await service.availability(fixture.dentist);
+    const slots = await service.availability(fixture.dentist, actor);
     expect(slots).toHaveLength(2);
     for (const slot of slots) expect(Object.keys(slot).sort()).toEqual(['_id', 'date', 'endTime', 'startTime', 'status']);
   });
@@ -175,7 +175,7 @@ localTests('Appointment scheduling persistence', () => {
       date, startTime: '09:00', endTime: '10:00', services: [treatment.id, treatment.id.toUpperCase()] };
     const current = operation === 'update' ? await appointments.create({ ...dto, services: [] }) : undefined;
     const result = current ? await service.update(current.id, dto, actor) : await service.create(dto, actor);
-    const saved = await appointments.findById(result.id).lean();
+    const saved = await appointments.findById(result._id.toString()).lean();
     expect(saved?.services.map(clinicReferenceId)).toEqual([treatment.id]);
   });
 

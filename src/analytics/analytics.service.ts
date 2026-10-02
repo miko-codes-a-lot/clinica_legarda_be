@@ -7,6 +7,7 @@ import { Appointment } from 'src/appointments/entities/appointment.entity';
 import { Referral } from 'src/referral/entities/referral.entity';
 import { appointmentScope, referenceId } from '../auth/record-policy';
 import { isAdmin, UserActor } from '../auth/role-policy';
+import { assertClinicAccess } from '../auth/clinic-policy';
 import { reportPeriod } from './report-period';
 import {
   DailyQueueResponse,
@@ -40,10 +41,8 @@ function reportScope(
   if (!isAdmin(actor) && actor?.role !== 'dentist') {
     throw new ForbiddenException('You cannot access appointment reports.');
   }
-  return {
-    ...appointmentScope(actor),
-    ...(clinicId === 'all' ? {} : { clinic: referenceId(clinicId) }),
-  };
+  if (clinicId !== 'all') assertClinicAccess(actor, clinicId);
+  return { $and: [appointmentScope(actor), clinicId === 'all' ? {} : { clinic: referenceId(clinicId) }] };
 }
 
 function serviceNames(services: ServiceName[]): string[] {

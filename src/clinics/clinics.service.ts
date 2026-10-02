@@ -13,6 +13,7 @@ import { ClinicUpsertDto } from './dto/clinic-upsert.dto';
 import { User } from 'src/users/entities/user.entity';
 import { clinicMembershipFilter } from 'src/users/clinic-membership';
 import { UserActor } from '../auth/role-policy';
+import { adminClinicIds, assertClinicAccess, visibleClinicMemberships } from '../auth/clinic-policy';
 
 @Injectable()
 export class ClinicsService {
@@ -25,8 +26,13 @@ export class ClinicsService {
     return this.clinicModel.find();
   }
 
-  async findOne(id: string) {
+  findAccessible(actor: UserActor) {
+    return this.clinicModel.find(actor.role === 'admin' ? { _id: { $in: adminClinicIds(actor) } } : {});
+  }
+
+  async findOne(id: string, actor: UserActor) {
     this.validateId(id);
+    assertClinicAccess(actor, id);
     const clinic = await this.clinicModel.findOne({ _id: id });
     if (!clinic) throw new NotFoundException('Clinic not found.');
     const dentists = await this.userModel
@@ -37,7 +43,7 @@ export class ClinicsService {
       })
       .select(DENTIST_DIRECTORY_FIELDS)
       .populate('clinic clinics');
-    return { ...clinic.toObject(), dentists };
+    return { ...clinic.toObject(), dentists: actor.role === 'admin' ? dentists.map(dentist => visibleClinicMemberships(dentist.toJSON(), actor)) : dentists };
   }
 
   async upsert(doc: ClinicUpsertDto, id?: string, actor?: UserActor) {

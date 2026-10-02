@@ -3,12 +3,14 @@ import { Test } from '@nestjs/testing';
 import * as request from 'supertest';
 import { AuthService } from '../auth/auth.service';
 import { RtNotificationsGateway } from './rt-notifications.gateway';
+import { NotificationsService } from './notifications.service';
 
 describe('Notification transport behind the API proxy', () => {
   let app: INestApplication;
   beforeAll(async () => {
     const module = await Test.createTestingModule({ providers: [RtNotificationsGateway,
       { provide: AuthService, useValue: { verifyJwt: async () => ({ sub: 'dentist-1' }) } },
+      { provide: NotificationsService, useValue: {} },
     ] }).compile();
     app = module.createNestApplication();
     app.setGlobalPrefix('api');

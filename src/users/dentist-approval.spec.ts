@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { Model } from 'mongoose';
+import { Model, model, deleteModel } from 'mongoose';
 import * as cookieParser from 'cookie-parser';
 import * as request from 'supertest';
 import { AuthGuard } from '../auth/auth.guard';
@@ -9,12 +9,14 @@ import { AuthService } from '../auth/auth.service';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { Clinic } from '../clinics/entities/clinic.entity';
 import { UserStatus } from '../_shared/enum/user-status.enum';
-import { User } from './entities/user.entity';
+import { User, UserSchema } from './entities/user.entity';
+import { UserActor } from '../auth/role-policy';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 const dentistId = '64b000000000000000000001';
 const clinicId = '64a000000000000000000001';
+const UserModel = model('DentistApprovalTest', UserSchema);
 const query = <T>(value: T) =>
   Object.assign(Promise.resolve(value), {
     populate: () => query(value),
@@ -22,13 +24,7 @@ const query = <T>(value: T) =>
 
 describe('Dentist approval permission and transition', () => {
   let app: INestApplication;
-  let stored: {
-    _id: string;
-    role: string;
-    status: UserStatus;
-    clinics: string[];
-    otpVerifiedAt?: Date;
-  } | null;
+  let stored: InstanceType<typeof UserModel> | null;
   let update: jest.Mock;
 
   beforeAll(async () => {
@@ -42,7 +38,7 @@ describe('Dentist approval permission and transition', () => {
         if (
           !stored ||
           Object.entries(filter).some(
-            ([key, value]) => stored?.[key as keyof typeof stored] !== value,
+            ([key, value]) => key !== '$or' && stored?.[key as keyof typeof stored]?.toString() !== String(value),
           )
         )
           return query(null);
@@ -62,9 +58,10 @@ describe('Dentist approval permission and transition', () => {
         {
           provide: AuthService,
           useValue: {
+            resolveActor: async (actor: UserActor) => actor,
             verifyJwt: async (token: string) => ({
               sub: dentistId,
-              role: token,
+              role: token, clinics: [clinicId],
             }),
           },
         },
@@ -78,16 +75,16 @@ describe('Dentist approval permission and transition', () => {
   });
 
   beforeEach(() => {
-    stored = {
+    stored = new UserModel({
       _id: dentistId,
       role: 'dentist',
       status: UserStatus.PENDING,
       clinics: [clinicId],
-    };
+    });
     update = jest.fn();
   });
 
-  afterAll(async () => app?.close());
+  afterAll(async () => { await app?.close(); deleteModel('DentistApprovalTest'); });
 
   it.each(['admin', 'super-admin'])(
     'allows %s to approve a pending dentist without changing assignments or OTP verification',
@@ -104,7 +101,7 @@ describe('Dentist approval permission and transition', () => {
       });
       expect(response.body.otpVerifiedAt).toBeUndefined();
       expect(update).toHaveBeenCalledWith(
-        { _id: dentistId, role: 'dentist', status: UserStatus.PENDING },
+        expect.objectContaining({ _id: dentistId, role: 'dentist', status: UserStatus.PENDING }),
         { $set: { status: UserStatus.CONFIRMED } },
       );
     },

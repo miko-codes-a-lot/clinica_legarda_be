@@ -30,6 +30,9 @@ export class Notification {
   @Prop()
   link?: string; // e.g., /appointments/60d...
 
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' })
+  appointment?: mongoose.Types.ObjectId;
+
   // Optional: The user who triggered the notification
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' })
   triggeredBy?: User;

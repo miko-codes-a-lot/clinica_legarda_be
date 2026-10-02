@@ -5,5 +5,6 @@ export class CreateNotificationDto {
   message: string;
   type: NotificationType;
   link?: string;
+  appointment?: string;
   triggeredBy?: string; // User ID
 }

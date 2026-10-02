@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { User } from '../users/entities/user.entity';
 import { Referral } from '../referral/entities/referral.entity';
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
@@ -34,6 +35,7 @@ describe('Appointment changes', () => {
     });
     const module = await Test.createTestingModule({ providers: [AppointmentsService,
       { provide: getModelToken(Referral.name), useValue: {} },
+      { provide: getModelToken(User.name), useValue: {} },
       { provide: getModelToken(Appointment.name), useValue: {
         findById: () => {
           const query = { session: () => query, populate: () => query, exec: async () => current };
@@ -61,7 +63,7 @@ describe('Appointment changes', () => {
 
   it.each([
     { sub: '000000000000000000000003', role: 'dentist' },
-    { sub: '000000000000000000000004', role: 'admin' },
+    { sub: '000000000000000000000004', role: 'admin', clinics: ['000000000000000000000001'] },
     { sub: '000000000000000000000005', role: 'super-admin' },
   ])('does not let a non-creator $role cancel a patient booking', async other => {
     await expect(service.cancel(current.id, other, 'Schedule conflict')).rejects.toBeInstanceOf(ForbiddenException);

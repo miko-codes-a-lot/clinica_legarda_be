@@ -92,6 +92,7 @@ export class NotificationListenerService implements OnModuleInit {
       message: `Your appointment with Dr. ${dentistName} has been booked and is pending confirmation.`,
       type: NotificationType.APPOINTMENT_CREATED,
       link: '/app/my-appointment',
+      appointment: appointment._id.toString(),
     });
 
     // 2. Add dentist notification to the list
@@ -100,10 +101,13 @@ export class NotificationListenerService implements OnModuleInit {
       message: `You have a new appointment request from ${patientName}.`,
       type: NotificationType.APPOINTMENT_CREATED,
       link: `/dentist/appointment/details/${appointment._id.toString()}`,
+      appointment: appointment._id.toString(),
     });
 
     // 3. Add admin notifications to the list
-    const admins = await this.userService.notificationStaffRecipients();
+    const admins = await this.userService.notificationStaffRecipients(
+      populatedAppointment.clinic.toString(),
+    );
     const adminMessage = `New appointment created for Dr. ${dentistName} by patient ${patientName}.`;
     admins.forEach((admin) => {
       notificationsToCreate.push({
@@ -111,6 +115,7 @@ export class NotificationListenerService implements OnModuleInit {
         message: adminMessage,
         type: NotificationType.APPOINTMENT_CREATED,
         link: `/admin/appointment/details/${appointment._id.toString()}`,
+        appointment: appointment._id.toString(),
       });
     });
 
@@ -181,6 +186,7 @@ export class NotificationListenerService implements OnModuleInit {
         message: patientMessage,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
         link: '/app/my-appointment',
+        appointment: appointment._id.toString(),
       });
     }
 
@@ -190,6 +196,7 @@ export class NotificationListenerService implements OnModuleInit {
         message: dentistMessage,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
         link: `/dentist/appointment/details/${appointment._id.toString()}`,
+        appointment: appointment._id.toString(),
       });
     }
 

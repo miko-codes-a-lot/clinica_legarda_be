@@ -1,10 +1,13 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from 'src/users/users.service';
 import { OtpService } from 'src/otp/otp.service';
 import { MailerService } from 'src/mailer/mailer.service';
 import { sendViaSemaphore } from './sms.helper';
 import * as bcrypt from 'bcrypt';
+import { assignedClinicIds } from '../users/clinic-membership';
+import { UserActor } from './role-policy';
+import { referenceId } from './record-policy';
 
 const OTP_SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -21,6 +24,17 @@ export class AuthService {
     return this.jwtService.verifyAsync(token, {
       secret: 'secret',
     });
+  }
+
+  async resolveActor(actor: UserActor): Promise<UserActor> {
+    const user = await this.userService.findForAuthentication(actor.sub);
+    if (!user) throw new UnauthorizedException('Account is no longer available.');
+    return {
+      sub: referenceId(user._id),
+      role: user.role,
+      username: user.username,
+      clinics: assignedClinicIds(user).map(referenceId),
+    };
   }
 
   async signIn(username: string, password: string) {

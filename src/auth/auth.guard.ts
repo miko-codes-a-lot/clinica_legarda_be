@@ -42,7 +42,7 @@ export class AuthGuard implements CanActivate {
         throw new UnauthorizedException('OTP verification required');
       }
 
-      request['user'] = payload;
+      request['user'] = await this.authService.resolveActor(payload);
     } catch (error) {
       if (error instanceof UnauthorizedException) throw error;
       throw new UnauthorizedException('Invalid or expired token.');

@@ -7,11 +7,11 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './entities/user.entity';
-import mongoose, { FilterQuery, Model } from 'mongoose';
+import mongoose, { FilterQuery, HydratedDocument, Model } from 'mongoose';
 import { UserUpsertDto } from './dto/user-upsert.dto';
 import * as bcrypt from 'bcrypt';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
-import { assignedClinicIds, clinicReferenceId } from './clinic-membership';
+import { assignedClinicIds, clinicMembershipFilter, clinicReferenceId } from './clinic-membership';
 import { isAdmin, UserActor } from 'src/auth/role-policy';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { referenceId, sameId } from '../auth/record-policy';
@@ -20,6 +20,7 @@ import {
   PATIENT_DIRECTORY_FIELDS,
 } from './user-projections';
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
+import { adminClinicIds, adminClinicScope, visibleClinicMemberships } from '../auth/clinic-policy';
 
 @Injectable()
 export class UsersService {
@@ -44,25 +45,34 @@ export class UsersService {
       .select('+password +resetOtp +resetOtpExpires +resetOtpVerified');
   }
 
-  findAll(actor: UserActor) {
+  async findAll(actor: UserActor) {
     if (!isAdmin(actor))
       throw new ForbiddenException(
         'Only administrators may access the user directory.',
       );
-    return this.userModel.find().populate('clinic clinics');
+    const filter = actor.role === 'admin' ? await this.adminUserFilter(actor) : {};
+    const users = await this.userModel.find(filter).populate('clinic clinics');
+    return users.map(user => this.visibleUser(user, actor));
   }
 
-  dentistDirectory(actor: UserActor) {
+  async dentistDirectory(actor: UserActor) {
     if (!actor?.sub) throw new ForbiddenException('Authentication required.');
-    return this.userModel
-      .find({ role: 'dentist', status: UserStatus.CONFIRMED })
+    const users = await this.userModel
+      .find({ role: 'dentist', status: UserStatus.CONFIRMED,
+        ...(actor.role === 'admin' ? clinicMembershipFilter(adminClinicIds(actor)) : {}),
+      })
       .select(DENTIST_DIRECTORY_FIELDS)
       .populate('clinic clinics');
+    return users.map(user => this.visibleUser(user, actor));
   }
 
   async patientDirectory(actor: UserActor) {
     if (!isAdmin(actor) && actor?.role !== 'dentist')
       throw new ForbiddenException('You cannot access the patient directory.');
+    if (actor.role === 'admin') {
+      return this.userModel.find({ role: 'user', ...await this.adminPatientFilter(actor) })
+        .select(PATIENT_DIRECTORY_FIELDS);
+    }
     const patientIds = isAdmin(actor)
       ? undefined
       : await this.appointmentModel.distinct('patient', {
@@ -74,9 +84,12 @@ export class UsersService {
   }
 
   /** Trusted recipient lookup, deliberately unavailable as a directory route. */
-  notificationStaffRecipients() {
+  notificationStaffRecipients(clinicId?: string) {
     return this.userModel
-      .find({ role: { $in: ['admin', 'super-admin'] } })
+      .find({ $or: [
+        { role: 'super-admin' },
+        ...(clinicId ? [{ role: 'admin', ...clinicMembershipFilter(referenceId(clinicId)) }] : []),
+      ] })
       .select('_id role');
   }
 
@@ -90,22 +103,28 @@ export class UsersService {
       .populate('clinic clinics');
     if (!user) throw new NotFoundException('User not found.');
     await this.authorizeProfile(user, actor);
-    return user;
+    return this.visibleUser(user, actor);
   }
 
   async pictureProfile(id: string, actor: UserActor) {
     if (!actor?.sub) throw new ForbiddenException('Authentication required.');
     const user = await this.userModel
       .findById(referenceId(id))
-      .select('_id role status profilePicture');
+      .select('_id role status profilePicture clinic clinics');
     if (!user) throw new NotFoundException('User not found.');
-    if (!(user.role === 'dentist' && user.status === UserStatus.CONFIRMED))
+    if (actor.role === 'admin' || !(user.role === 'dentist' && user.status === UserStatus.CONFIRMED))
       await this.authorizeProfile(user, actor);
     return user;
   }
 
   private async authorizeProfile(user: User, actor: UserActor) {
-    if (isAdmin(actor) || (actor?.sub && sameId(actor.sub, user._id))) return;
+    if (actor?.role === 'super-admin' || (actor?.sub && sameId(actor.sub, user._id))) return;
+    if (actor?.role === 'admin') {
+      const memberships = adminClinicIds(actor);
+      if (user.role !== 'super-admin' && assignedClinicIds(user).some(id => memberships.includes(referenceId(id)))) return;
+      if (user.role === 'user' && await this.appointmentModel.exists({ patient: user._id, ...adminClinicScope(actor) })) return;
+      throw new ForbiddenException('This user is outside your assigned clinics.');
+    }
     if (
       actor?.role === 'dentist' &&
       user.role === 'user' &&
@@ -118,6 +137,24 @@ export class UsersService {
     throw new ForbiddenException('You cannot access this profile.');
   }
 
+  private async adminPatientFilter(actor: UserActor) {
+    const patients = await this.appointmentModel.distinct('patient', adminClinicScope(actor));
+    return { $or: [{ _id: { $in: patients } }, clinicMembershipFilter(adminClinicIds(actor))] };
+  }
+
+  private async adminUserFilter(actor: UserActor) {
+    return { $or: [
+      { _id: referenceId(actor.sub) },
+      { role: { $in: ['admin', 'dentist'] }, ...clinicMembershipFilter(adminClinicIds(actor)) },
+      { role: 'user', ...await this.adminPatientFilter(actor) },
+    ] };
+  }
+
+  private visibleUser(user: HydratedDocument<User>, actor: UserActor) {
+    if (actor.role !== 'admin') return user;
+    return visibleClinicMemberships(user.toJSON(), actor);
+  }
+
   async authorizePictureWrite(id: string, actor: UserActor) {
     if (!actor || (!isAdmin(actor) && !sameId(actor.sub, id)))
       throw new ForbiddenException('You cannot change this picture.');
@@ -127,15 +164,18 @@ export class UsersService {
       throw new ForbiddenException(
         'Only super administrators may manage super administrators.',
       );
+    await this.authorizeProfile(existing, actor);
   }
 
   async updateProfilePicture(id: string, fileName: string, actor: UserActor) {
     await this.authorizePictureWrite(id, actor);
-    return this.userModel.findByIdAndUpdate(
+    const updated = await this.userModel.findByIdAndUpdate(
       id,
       { profilePicture: fileName },
       { new: true, runValidators: true },
     );
+    if (!updated) throw new NotFoundException('User not found.');
+    return this.visibleUser(updated, actor);
   }
 
   async approveDentist(id: string, actor: UserActor) {
@@ -143,17 +183,25 @@ export class UsersService {
       throw new ForbiddenException('Only administrators may approve dentists.');
     }
     const userId = referenceId(id);
+    if (actor.role === 'admin') {
+      const existing = await this.userModel.findById(userId);
+      if (!existing) throw new NotFoundException('Dentist not found.');
+      await this.authorizeProfile(existing, actor);
+    }
     const approved = await this.userModel
       .findOneAndUpdate(
-        { _id: userId, role: 'dentist', status: UserStatus.PENDING },
+        { _id: userId, role: 'dentist', status: UserStatus.PENDING,
+          ...(actor.role === 'admin' ? clinicMembershipFilter(adminClinicIds(actor)) : {}),
+        },
         { $set: { status: UserStatus.CONFIRMED } },
         { new: true, runValidators: true },
       )
       .populate('clinic clinics');
-    if (approved) return approved;
+    if (approved) return this.visibleUser(approved, actor);
 
     const existing = await this.userModel.findById(userId);
     if (!existing) throw new NotFoundException('Dentist not found.');
+    if (actor.role === 'admin') await this.authorizeProfile(existing, actor);
     if (existing.role !== 'dentist') {
       throw new BadRequestException(
         'Only dentist accounts can be approved here.',
@@ -174,6 +222,17 @@ export class UsersService {
     }
     const existing = id ? await this.userModel.findById(id) : null;
     if (id && !existing) throw new NotFoundException('User not found.');
+    if (!existing && doc.role === undefined) throw new BadRequestException('Select a valid user role.');
+    if (actor.role === 'admin') {
+      if (existing) await this.authorizeProfile(existing, actor);
+      else if (!adminClinicIds(actor).length) throw new ForbiddenException('A clinic assignment is required to create users.');
+      if (existing && !sameId(actor.sub, existing._id)) {
+        const credentialsChanged = !!doc.password || ['username', 'emailAddress', 'mobileNumber']
+          .some(field => doc[field] !== undefined && doc[field] !== existing[field]);
+        if (credentialsChanged && await this.hasOutsideClinicAccess(existing, actor))
+          throw new ForbiddenException('Only super administrators may change another shared account’s sign-in or verification details.');
+      }
+    }
 
     const update = this.profileFields(doc);
     const writeCondition: FilterQuery<User> = {};
@@ -227,6 +286,10 @@ export class UsersService {
           : undefined;
       const role = doc.role ?? existing?.role;
       const ordinaryAdmin = actor.role !== 'super-admin';
+      if (actor.role === 'admin' && existing && role !== existing.role &&
+        await this.hasOutsideClinicAccess(existing, actor)) {
+        throw new ForbiddenException('Only super administrators may change a shared user’s role.');
+      }
       if (ordinaryAdmin && existing) {
         // Prevent a concurrent role change from bypassing the membership policy.
         writeCondition.role = existing.role;
@@ -237,10 +300,9 @@ export class UsersService {
       }
       if (ordinaryAdmin && (role === 'admin' || existing?.role === 'admin')) {
         const assigned = existing ? assignedClinicIds(existing) : [];
-        const changed =
-          clinics !== undefined &&
-          (clinics.length !== assigned.length ||
-            clinics.some((clinic) => !assigned.includes(clinic)));
+        const visible = actor.role === 'admin' ? assigned.filter(clinic => adminClinicIds(actor).includes(referenceId(clinic))) : assigned;
+        const sameAssignments = (value: string[]) => clinics?.length === value.length && clinics.every(clinic => value.includes(clinic));
+        const changed = clinics !== undefined && !sameAssignments(assigned) && !sameAssignments(visible);
         const newlyAssignedAdmin =
           role === 'admin' &&
           existing?.role !== 'admin' &&
@@ -265,11 +327,34 @@ export class UsersService {
             'One or more assigned clinics do not exist.',
           );
         }
-        update.clinics = clinics;
-        if (clinics.length) update.clinic = clinics[0];
+        if (actor.role === 'admin' && role === 'dentist') {
+          const allowed = adminClinicIds(actor);
+          const outside = existing ? assignedClinicIds(existing).filter(clinic => !allowed.includes(referenceId(clinic))) : [];
+          if (clinics.some(clinic => !allowed.includes(clinic) && !outside.includes(clinic)))
+            throw new ForbiddenException('You cannot assign clinics outside your scope.');
+          update.clinics = [...new Set([...clinics.filter(clinic => allowed.includes(clinic)), ...outside])];
+          if (existing) {
+            writeCondition.clinics = existing.clinics ?? { $exists: false };
+            writeCondition.clinic = existing.clinic ?? null;
+          }
+        } else if (!(actor.role === 'admin' && role === 'user')) {
+          update.clinics = clinics;
+        }
+        if (Array.isArray(update.clinics) && update.clinics.length) update.clinic = update.clinics[0];
+      }
+      if (actor.role === 'admin' && role === 'user' && !existing) {
+        update.clinics = adminClinicIds(actor);
+        update.clinic = adminClinicIds(actor)[0];
       }
     }
-    return this.persist(update, id, writeCondition);
+    const saved = await this.persist(update, id, writeCondition);
+    return saved ? this.visibleUser(saved, actor) : saved;
+  }
+
+  private async hasOutsideClinicAccess(user: User, actor: UserActor) {
+    const clinics = adminClinicIds(actor);
+    return assignedClinicIds(user).some(clinic => !clinics.includes(referenceId(clinic))) ||
+      !!await this.appointmentModel.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } });
   }
 
   /** Public registration has an explicit, nonprivileged write path. */
@@ -381,6 +466,9 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found.`);
     }
+    await this.authorizeProfile(user, actor);
+    if (actor.role === 'admin' && await this.hasOutsideClinicAccess(user, actor))
+      throw new ForbiddenException('Only super administrators may delete users shared with other clinics.');
 
     // Optional protection
     // Prevent deleting main admins

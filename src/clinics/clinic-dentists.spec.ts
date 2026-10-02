@@ -20,7 +20,7 @@ it('looks up dentists by all assignments and only falls back for absent membersh
     clinicModel,
     { find },
   ]) as ClinicsService;
-  const result = await service.findOne(clinicId);
+  const result = await service.findOne(clinicId, { sub: '64b000000000000000000099', role: 'super-admin' });
   expect(find).toHaveBeenCalledWith({
     role: 'dentist',
     status: 'confirmed',

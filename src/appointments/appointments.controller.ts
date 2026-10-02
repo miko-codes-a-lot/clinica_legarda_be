@@ -54,8 +54,8 @@ export class AppointmentsController {
   }
 
   @Get('availability/:dentistId')
-  availability(@Param('dentistId') dentistId: string) {
-    return this.appointmentsService.availability(dentistId);
+  availability(@Param('dentistId') dentistId: string, @User() actor: UserActor) {
+    return this.appointmentsService.availability(dentistId, actor);
   }
 
   @Get(':id')

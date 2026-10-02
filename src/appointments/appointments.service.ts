@@ -16,7 +16,9 @@ import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 import { AppointmentAvailabilityDto } from './dto/appointment-availability.dto';
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
-import { clinicReferenceId } from '../users/clinic-membership';
+import { clinicMembershipFilter, clinicReferenceId } from '../users/clinic-membership';
+import { User } from '../users/entities/user.entity';
+import { adminClinicIds, adminClinicScope, assertClinicAccess, canAccessClinic, visibleClinicMemberships } from '../auth/clinic-policy';
 import {
   AppointmentSchedulingService,
   OCCUPIED_STATUSES,
@@ -42,10 +44,12 @@ export class AppointmentsService {
     private readonly appointmentModel: Model<Appointment>,
     private readonly scheduling: AppointmentSchedulingService,
     @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
   async create(dto: AppointmentUpsertDto, actor: UserActor) {
     authorizeAppointment(actor, dto);
+    await this.authorizePatient(actor, dto.patient);
     if (
       actor.role === 'dentist' &&
       !(await this.appointmentModel.exists({
@@ -87,19 +91,22 @@ export class AppointmentsService {
     return this.findOne(id, actor);
   }
 
-  async availability(dentistId: string): Promise<AppointmentAvailabilityDto[]> {
+  async availability(dentistId: string, actor: UserActor): Promise<AppointmentAvailabilityDto[]> {
     if (!Types.ObjectId.isValid(dentistId))
       throw new BadRequestException('Invalid dentist ID');
+    if (actor.role === 'admin' && !await this.userModel.exists({
+      _id: referenceId(dentistId), role: 'dentist', ...clinicMembershipFilter(adminClinicIds(actor)),
+    })) throw new ForbiddenException('This dentist is outside your assigned clinics.');
     const appointments = await this.appointmentModel
       .find({
         dentist: dentistId,
         status: { $in: OCCUPIED_STATUSES },
       })
-      .select('_id date startTime endTime status')
+      .select('_id clinic date startTime endTime status')
       .lean()
       .exec();
     return appointments.map((appointment) => ({
-      _id: appointment._id.toString(),
+      ...(actor.role !== 'admin' || canAccessClinic(actor, appointment.clinic) ? { _id: appointment._id.toString() } : {}),
       date: appointment.date,
       startTime: appointment.startTime,
       endTime: appointment.endTime,
@@ -108,6 +115,7 @@ export class AppointmentsService {
   }
 
   findAll(actor: UserActor, patient?: string, clinic?: string) {
+    if (clinic) assertClinicAccess(actor, clinic);
     return this.populate(
       this.appointmentModel.find({
         $and: [
@@ -116,10 +124,11 @@ export class AppointmentsService {
           clinic ? { clinic: referenceId(clinic) } : {},
         ],
       }),
-    ).exec();
+    ).exec().then(records => records.map(record => this.visibleAppointment(record, actor)));
   }
 
   findAllByDentist(actor: UserActor, dentist: string, clinic?: string) {
+    if (clinic) assertClinicAccess(actor, clinic);
     return this.populate(
       this.appointmentModel.find({
         $and: [
@@ -128,7 +137,7 @@ export class AppointmentsService {
           clinic ? { clinic: referenceId(clinic) } : {},
         ],
       }),
-    ).exec();
+    ).exec().then(records => records.map(record => this.visibleAppointment(record, actor)));
   }
 
   async findOne(id: string, actor: UserActor) {
@@ -137,7 +146,23 @@ export class AppointmentsService {
     ).exec();
     if (!appointment) throw new NotFoundException('Appointment not found.');
     authorizeAppointment(actor, appointment);
-    return appointment;
+    return this.visibleAppointment(appointment, actor);
+  }
+
+  private visibleAppointment(record: AppointmentDocument, actor: UserActor) {
+    if (actor.role !== 'admin') return record;
+    const result = record.toJSON();
+    // The dentist directory projection also contains memberships. Clamp nested users.
+    result.dentist = visibleClinicMemberships(result.dentist, actor);
+    return result;
+  }
+
+  private async authorizePatient(actor: UserActor, patient: string, session?: ClientSession) {
+    if (actor.role !== 'admin') return;
+    const id = referenceId(patient);
+    const member = await this.userModel.exists({ _id: id, role: 'user', ...clinicMembershipFilter(adminClinicIds(actor)) }).session(session ?? null);
+    const history = member || await this.appointmentModel.exists({ patient: id, ...adminClinicScope(actor) }).session(session ?? null);
+    if (!history) throw new ForbiddenException('This patient is outside your assigned clinics.');
   }
 
   private populate<
@@ -162,12 +187,14 @@ export class AppointmentsService {
   }
 
   async update(id: string, dto: AppointmentUpsertDto, actor: UserActor) {
+    authorizeAppointment(actor, dto);
     await this.withExistingSchedule(
       id,
       actor,
       [dto.dentist, dto.patient],
       async (current, session) => {
         this.requireStatus(current, [AppointmentStatus.PENDING]);
+        await this.authorizePatient(actor, dto.patient, session);
         if (
           !isAdmin(actor) &&
           (!sameId(dto.patient, current.patient) ||
@@ -348,6 +375,7 @@ export class AppointmentsService {
         )
         .exec();
     if (!appointment) {
+      assertClinicAccess(actor, referral.fromClinicId);
       await this.scheduling.withLocks(
         referral.patient ? [referenceId(referral.patient)] : [],
         async (session) => {
@@ -525,6 +553,7 @@ export class AppointmentsService {
     }
     if (referral.status === ReferralStatus.REJECTED)
       throw new BadRequestException('Rejected referrals cannot be linked.');
+    assertClinicAccess(actor, referral.fromClinicId);
     if (
       !referral.patient ||
       !sameId(referral.patient, patient) ||

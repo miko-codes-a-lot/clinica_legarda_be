@@ -9,11 +9,11 @@ export class NotificationsController {
 
   @Get()
   findAll(@User() user: UserDto) {
-    return this.notificationsService.findAllForUser(user.sub);
+    return this.notificationsService.findAllForUser(user);
   }
 
   @Patch(':id/read')
   markAsRead(@Param('id') id: string, @User() user: UserDto) {
-    return this.notificationsService.markAsRead(id, user.sub);
+    return this.notificationsService.markAsRead(id, user);
   }
 }

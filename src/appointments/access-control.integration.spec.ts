@@ -54,7 +54,7 @@ localTests('Record access boundaries', () => {
   };
   const hours = [{ day: 'monday', startTime: '08:00', endTime: '18:00' }];
   const date = new Date('2026-09-21');
-  const admin = { sub: '64b000000000000000000099', role: 'admin' };
+  const admin = { sub: '64b000000000000000000099', role: 'super-admin' };
   const actor = (role: 'user' | 'dentist', other = false) => ({
     sub:
       role === 'user'
@@ -81,7 +81,7 @@ localTests('Record access boundaries', () => {
     service = new AppointmentsService(
       appointments,
       new AppointmentSchedulingService(appointments, users, clinics, catalog),
-      referrals,
+      referrals, users,
     );
     userService = new UsersService(users, clinics, appointments);
     referralService = new ReferralsService(referrals, appointments, service);
@@ -94,6 +94,7 @@ localTests('Record access boundaries', () => {
         {
           provide: AuthService,
           useValue: {
+            resolveActor: async (actor) => actor,
             verifyJwt: async (token: string) => {
               if (token === 'patient') return actor('user');
               if (token === 'dentist') return actor('dentist');
@@ -236,7 +237,7 @@ localTests('Record access boundaries', () => {
     'intersects every list filter with %s ownership',
     async (role) => {
       const own = actor(role);
-      expect((await service.findAll(own)).map((record) => record.id)).toEqual([
+      expect((await service.findAll(own)).map((record) => record._id.toString())).toEqual([
         fixture.appointment,
       ]);
       expect(
@@ -251,7 +252,7 @@ localTests('Record access boundaries', () => {
       ).toEqual([]);
       expect(
         (await service.findAll(own, undefined, fixture.clinic)).map(
-          (record) => record.id,
+          (record) => record._id.toString(),
         ),
       ).toEqual([fixture.appointment]);
       expect((await service.findAll(admin)).length).toBe(2);
@@ -307,7 +308,7 @@ localTests('Record access boundaries', () => {
   it('accepts equivalent uppercase actor and identity IDs without exposing another record', async () => {
     const own = { ...actor('user'), sub: fixture.patient.toUpperCase() };
     expect(
-      (await service.findOne(fixture.appointment.toUpperCase(), own)).id,
+      (await service.findOne(fixture.appointment.toUpperCase(), own))._id.toString(),
     ).toBe(fixture.appointment);
     const result = await service.update(
       fixture.appointment,
@@ -375,11 +376,11 @@ localTests('Record access boundaries', () => {
       'Appointment created.',
     ]);
     await service.updateDentistNotes(
-      created.id,
+      created._id.toString(),
       'Preserve chart',
       actor('dentist'),
     );
-    const updated = await service.update(created.id, forged, actor('user'));
+    const updated = await service.update(created._id.toString(), forged, actor('user'));
     expect(updated.status).toBe('pending');
     expect(updated.notes.clinicNotes).toBe('Preserve chart');
     expect(updated.history.some((entry) => entry.action === 'Forged')).toBe(
@@ -405,13 +406,13 @@ localTests('Record access boundaries', () => {
     const directory = await userService.dentistDirectory(actor('user'));
     expect(directory).toHaveLength(2);
     const clinic = await new ClinicsService(clinics, users).findOne(
-      fixture.clinic,
+      fixture.clinic, actor('user'),
     );
     expect(clinic.dentists).toHaveLength(2);
     for (const dentist of [...directory, ...clinic.dentists]) {
-      expect(dentist.toObject()).toHaveProperty('operatingHours');
-      expect(dentist.toObject()).not.toHaveProperty('emailAddress');
-      expect(dentist.toObject()).not.toHaveProperty('otpVerifiedAt');
+      expect(JSON.parse(JSON.stringify(dentist))).toHaveProperty('operatingHours');
+      expect(JSON.parse(JSON.stringify(dentist))).not.toHaveProperty('emailAddress');
+      expect(JSON.parse(JSON.stringify(dentist))).not.toHaveProperty('otpVerifiedAt');
     }
     expect(
       (await userService.patientDirectory(actor('dentist'))).map(
@@ -462,7 +463,7 @@ localTests('Record access boundaries', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await expect(
-      userService.updateProfilePicture(superAdmin.id, 'forged.png', admin),
+      userService.updateProfilePicture(superAdmin.id, 'forged.png', { ...admin, role: 'admin', clinics: [fixture.clinic] }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await expect(
       userService.delete(fixture.otherPatient, actor('dentist')),

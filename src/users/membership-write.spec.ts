@@ -15,7 +15,7 @@ import { Clinic } from 'src/clinics/entities/clinic.entity';
 const clinicA = '64a000000000000000000001';
 const clinicB = '64a000000000000000000002';
 const dentistId = '64b000000000000000000001';
-const admin = { sub: '64b000000000000000000002', role: 'admin' };
+const admin = { sub: '64b000000000000000000002', role: 'admin', clinics: [clinicA, clinicB] };
 const superAdmin = { sub: '64b000000000000000000003', role: 'super-admin' };
 const dentist = { sub: dentistId, role: 'dentist' };
 const UserModel = mongoose.model('MembershipWriteTest', UserSchema);
@@ -89,7 +89,7 @@ describe('User membership writes and profile authorization', () => {
     service = new UsersService(
       userModel as unknown as Model<User>,
       clinicModel as unknown as Model<Clinic>,
-      {} as Model<Appointment>,
+      { exists: async () => null } as unknown as Model<Appointment>,
     );
   });
 
@@ -201,7 +201,7 @@ describe('User membership writes and profile authorization', () => {
     expect(stored.clinic?.toString()).toBe(clinicA);
   });
 
-  it('rejects an admin promotion if a super admin concurrently assigns clinics to that dentist', async () => {
+  it('denies promoting an unassigned dentist before concurrent membership writes', async () => {
     stored.set({ clinic: undefined, clinics: undefined });
     beforeWrite = () =>
       stored.set({
@@ -210,10 +210,10 @@ describe('User membership writes and profile authorization', () => {
       });
     await expect(
       save(service, form({ role: 'admin', clinics: [] })),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).rejects.toBeInstanceOf(ForbiddenException);
     expect(writes).toBe(0);
     expect(stored.role).toBe('dentist');
-    expect(stored.clinic?.toString()).toBe(clinicB);
+    expect(stored.clinic).toBeUndefined();
   });
 
   it('rejects an ordinary admin creating an assigned admin', async () => {
