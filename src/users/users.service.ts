@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './entities/user.entity';
-import mongoose, { Model } from 'mongoose';
+import mongoose, { FilterQuery, Model } from 'mongoose';
 import { UserUpsertDto } from './dto/user-upsert.dto';
 import * as bcrypt from 'bcrypt';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
@@ -176,6 +176,7 @@ export class UsersService {
     if (id && !existing) throw new NotFoundException('User not found.');
 
     const update = this.profileFields(doc);
+    const writeCondition: FilterQuery<User> = {};
     if (!isAdmin(actor)) {
       if (!existing) throw new ForbiddenException('You cannot create users.');
       const assigned = assignedClinicIds(existing);
@@ -218,10 +219,43 @@ export class UsersService {
       ) {
         throw new BadRequestException('Invalid clinic ID.');
       }
-      if (doc.clinics !== undefined || doc.clinic !== undefined) {
-        const clinics = this.normalizeClinicIds(
-          doc.clinics !== undefined ? doc.clinics : [doc.clinic],
-        );
+      const clinics =
+        doc.clinics !== undefined || doc.clinic !== undefined
+          ? this.normalizeClinicIds(
+              doc.clinics !== undefined ? doc.clinics : [doc.clinic],
+            )
+          : undefined;
+      const role = doc.role ?? existing?.role;
+      const ordinaryAdmin = actor.role !== 'super-admin';
+      if (ordinaryAdmin && existing) {
+        // Prevent a concurrent role change from bypassing the membership policy.
+        writeCondition.role = existing.role;
+        if (role === 'admin' && existing.role !== 'admin') {
+          writeCondition.clinics = existing.clinics ?? { $exists: false };
+          writeCondition.clinic = existing.clinic ?? null;
+        }
+      }
+      if (ordinaryAdmin && (role === 'admin' || existing?.role === 'admin')) {
+        const assigned = existing ? assignedClinicIds(existing) : [];
+        const changed =
+          clinics !== undefined &&
+          (clinics.length !== assigned.length ||
+            clinics.some((clinic) => !assigned.includes(clinic)));
+        const newlyAssignedAdmin =
+          role === 'admin' &&
+          existing?.role !== 'admin' &&
+          (clinics ?? assigned).length > 0;
+        if (changed || newlyAssignedAdmin) {
+          throw new ForbiddenException(
+            'Only super administrators may change admin clinic assignments.',
+          );
+        }
+      }
+      // Ordinary admin profile forms may echo assignments, but cannot write them.
+      if (
+        clinics !== undefined &&
+        !(ordinaryAdmin && (role === 'admin' || existing?.role === 'admin'))
+      ) {
         if (
           clinics.length &&
           (await this.clinicModel.countDocuments({ _id: { $in: clinics } })) !==
@@ -235,7 +269,7 @@ export class UsersService {
         if (clinics.length) update.clinic = clinics[0];
       }
     }
-    return this.persist(update, id);
+    return this.persist(update, id, writeCondition);
   }
 
   /** Public registration has an explicit, nonprivileged write path. */
@@ -280,7 +314,11 @@ export class UsersService {
     return [...new Set((value as string[]).map((id) => id.toLowerCase()))];
   }
 
-  private async persist(doc: Record<string, unknown>, id?: string) {
+  private async persist(
+    doc: Record<string, unknown>,
+    id?: string,
+    writeCondition: FilterQuery<User> = {},
+  ) {
     if (typeof doc.password === 'string' && doc.password) {
       doc.password = await bcrypt.hash(doc.password, 10);
     } else {
@@ -315,9 +353,9 @@ export class UsersService {
       }
     }
 
-    return this.userModel
+    const saved = await this.userModel
       .findOneAndUpdate(
-        { _id: id || new mongoose.Types.ObjectId() },
+        { _id: id || new mongoose.Types.ObjectId(), ...writeCondition },
         {
           $set: doc,
           ...(Array.isArray(doc.clinics) &&
@@ -326,6 +364,12 @@ export class UsersService {
         { upsert: !id, new: true, runValidators: true },
       )
       .populate('clinic clinics');
+    if (!saved && Object.keys(writeCondition).length > 0) {
+      throw new ConflictException(
+        'User assignments or role changed. Refresh and try again.',
+      );
+    }
+    return saved;
   }
 
   async delete(id: string, actor: UserActor) {
