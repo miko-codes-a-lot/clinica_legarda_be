@@ -1,3 +1,5 @@
+import { PatientCareController } from './patient-care.controller';
+import { PatientCareService } from './patient-care.service';
 import { ClinicClosure, ClinicClosureSchema } from '../clinic-closures/entities/clinic-closure.entity';
 import { LedgerEntry, LedgerEntrySchema } from '../ledger/entities/ledger-entry.entity';
 import { Module } from '@nestjs/common';
@@ -27,8 +29,8 @@ import { TreatmentCasesController } from './treatment-cases.controller';
       { name: LedgerEntry.name, schema: LedgerEntrySchema },
     { name: TreatmentCase.name, schema: TreatmentCaseSchema },
   ])],
-  controllers: [PatientRecordsController, VisitsController, TreatmentCasesController],
-  providers: [CareAccessService, PatientRecordsService, VisitsService, TreatmentCasesService],
+  controllers: [PatientCareController, PatientRecordsController, VisitsController, TreatmentCasesController],
+  providers: [PatientCareService, CareAccessService, PatientRecordsService, VisitsService, TreatmentCasesService],
   exports: [CareAccessService],
 })
 export class CareModule {}

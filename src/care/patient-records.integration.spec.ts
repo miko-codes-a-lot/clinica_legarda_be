@@ -1,3 +1,5 @@
+import { PatientCareController } from './patient-care.controller';
+import { PatientCareService } from './patient-care.service';
 import { CanActivate, ExecutionContext, INestApplication, UnauthorizedException, ValidationPipe } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -53,7 +55,8 @@ const uri = process.env.TEST_CARE_MONGO_URI;
       req.user = { sub: person._id.toString(), role: person.role, clinics: assignedClinicIds(person) };
       return true;
     } };
-    const module = await Test.createTestingModule({ controllers: [PatientRecordsController, VisitsController, TreatmentCasesController, AppointmentsController, UsersController], providers: [
+    const module = await Test.createTestingModule({ controllers: [PatientCareController, PatientRecordsController, VisitsController, TreatmentCasesController, AppointmentsController, UsersController], providers: [
+      { provide: PatientCareService, useValue: new PatientCareService(visits, cases, appointments) },
       { provide: PatientRecordsService, useValue: new PatientRecordsService(access, users, appointments) },
       { provide: VisitsService, useValue: new VisitsService(access, visits, users, connection.model<Clinic>(Clinic.name), appointments, cases) },
       { provide: TreatmentCasesService, useValue: new TreatmentCasesService(access, cases, visits, appointments, users, connection.model<Clinic>(Clinic.name)) },
@@ -91,6 +94,22 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     const req = request(app.getHttpServer()).get(url);
     return actor ? req.set('x-fixture-user', actor) : req;
   };
+  it('returns only the signed-in patient completed summary and public case/session payloads', async () => {
+    const v = await visits.create({ patient: fixture.patient, clinic: fixture.clinic, dentist: fixture.dentist, date: manilaDay(), checkedInAt: new Date(), purpose: 'consultation', state: 'completed', createdBy: fixture.admin,
+      assessment: 'PRIVATE_ASSESSMENT', summary: 'Published visit summary', aftercare: 'Public aftercare', nextSteps: 'Public next steps', treatments: [{ description: 'Examination', tooth: '11', notes: 'PRIVATE_PROCEDURE' }], events: [{ state: 'completed', actor: fixture.admin, at: new Date() }] });
+    const c = await cases.create({ patient: fixture.patient, clinic: fixture.clinic, dentist: fixture.dentist, consultationVisit: v._id, title: 'Treatment plan', plan: 'Public case plan', internalNotes: 'PRIVATE_CASE', createdBy: fixture.dentist });
+    await visits.updateOne({ _id: v._id }, { $set: { careCase: c._id } });
+    await visits.create({ patient: fixture.patient, clinic: fixture.clinic, dentist: fixture.dentist, date: manilaDay(), checkedInAt: new Date(), purpose: 'consultation', state: 'in_progress', createdBy: fixture.admin, summary: 'PRIVATE_DRAFT' });
+    await visits.create({ patient: fixture.outsidePatient, clinic: fixture.outside, dentist: fixture.dentist, date: manilaDay(), checkedInAt: new Date(), purpose: 'consultation', state: 'completed', createdBy: fixture.admin, summary: 'OTHER_PATIENT_SUMMARY' });
+    await appointments.updateOne({ patient: fixture.patient, clinic: fixture.clinic }, { $set: { careCase: c._id, notes: { clinicNotes: 'PRIVATE_APPOINTMENT' } } });
+    const result = await get('/care/my-record', fixture.patient).expect(200);
+    expect(result.body.visits).toHaveLength(1); expect(result.body.visits[0].summary).toBe('Published visit summary');
+    expect(result.body.visits[0].treatments).toEqual([{ description: 'Examination', tooth: '11' }]);
+    expect(result.body.cases[0].plan).toBe('Public case plan'); expect(result.body.appointments).toHaveLength(1);
+    expect(JSON.stringify(result.body)).not.toMatch(/PRIVATE_|OTHER_PATIENT|assessment|internalNotes|clinicalAuthor|events|actor|createdBy|password/);
+    await get('/care/my-record', fixture.admin).expect(403);
+    expect((await get(`/care/my-record?patient=${fixture.patient}`, fixture.outsidePatient).expect(200)).body.visits[0].summary).toBe('OTHER_PATIENT_SUMMARY');
+  });
   it('requires authentication and rejects patients from staff records', async () => {
     await get('/care/patients').expect(401);
     await get('/care/patients', fixture.patient).expect(403);
