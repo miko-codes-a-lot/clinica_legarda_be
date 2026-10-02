@@ -11,6 +11,10 @@ import { assignedClinicIds } from '../users/clinic-membership';
 import { CareAccessService } from './care-access.service';
 import { PatientRecordsController } from './patient-records.controller';
 import { PatientRecordsService } from './patient-records.service';
+import { Visit, VisitSchema } from './entities/visit.entity';
+import { VisitsService } from './visits.service';
+import { VisitsController } from './visits.controller';
+import { manilaDay } from './visit-rules';
 
 const uri = process.env.TEST_CARE_MONGO_URI;
 (uri ? describe : describe.skip)('Patient record search HTTP and database scope', () => {
@@ -18,15 +22,17 @@ const uri = process.env.TEST_CARE_MONGO_URI;
   let app: INestApplication;
   let users: Model<User>;
   let appointments: Model<Appointment>;
+  let visits: Model<Visit>;
   let fixture: { clinic: string; outside: string; admin: string; noClinic: string; superAdmin: string; dentist: string; patient: string; outsidePatient: string; literal: string };
   beforeAll(async () => {
     if (uri !== 'mongodb://127.0.0.1:27028/clinica_care_spec?replicaSet=clinica-test') throw new Error('Use only the care task isolated database.');
     connection = await createConnection(uri).asPromise();
     users = connection.model(User.name, UserSchema);
     appointments = connection.model(Appointment.name, AppointmentSchema);
+    visits = connection.model(Visit.name, VisitSchema);
     connection.model(Clinic.name, ClinicSchema);
     connection.model(DentalCatalog.name, DentalCatalogSchema);
-    const access = new CareAccessService(users, appointments);
+    const access = new CareAccessService(users, appointments, visits);
     const guard: CanActivate = { canActivate: async (context: ExecutionContext) => {
       const req = context.switchToHttp().getRequest<{ headers: Record<string, string>; user?: unknown }>();
       const identity = req.headers['x-fixture-user'];
@@ -35,8 +41,9 @@ const uri = process.env.TEST_CARE_MONGO_URI;
       req.user = { sub: person._id.toString(), role: person.role, clinics: assignedClinicIds(person) };
       return true;
     } };
-    const module = await Test.createTestingModule({ controllers: [PatientRecordsController], providers: [
+    const module = await Test.createTestingModule({ controllers: [PatientRecordsController, VisitsController], providers: [
       { provide: PatientRecordsService, useValue: new PatientRecordsService(access, users, appointments) },
+      { provide: VisitsService, useValue: new VisitsService(access, visits, users, connection.model<Clinic>(Clinic.name), appointments) },
       { provide: APP_GUARD, useValue: guard },
     ] }).compile();
     app = module.createNestApplication();
@@ -49,7 +56,7 @@ const uri = process.env.TEST_CARE_MONGO_URI;
       { role: 'admin', username: 'admin', clinics: [places[0]._id] },
       { role: 'admin', username: 'empty', clinics: [] },
       { role: 'super-admin', username: 'global' },
-      { role: 'dentist', username: 'dentist', clinics: places.map(place => place._id) },
+      { role: 'dentist', username: 'dentist', clinics: places.map(place => place._id), status: 'confirmed' },
       { role: 'user', username: 'ana.patient', firstName: 'Ana', lastName: 'Rivera', mobileNumber: '+639171230001', emailAddress: 'ana@example.test', clinics: [places[0]._id], password: 'secret-fixture-hash', resetOtp: 'secret-fixture-otp', status: 'confirmed' },
       { role: 'user', username: 'outside.patient', firstName: 'Outside', lastName: 'Patient', clinics: [places[1]._id] },
       { role: 'user', username: 'literal.patient', firstName: 'Ana.*(test)', lastName: 'Literal', clinics: [places[0]._id], status: 'walk_in', isWalkIn: true },
@@ -111,5 +118,63 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     await get('/care/patients/bad', fixture.admin).expect(400);
     const page = await get('/care/patients?page=2', fixture.superAdmin).expect(200);
     expect(page.body).toMatchObject({ items: [], page: 2, pageSize: 20, total: 3 });
+  });
+
+  const intake = () => ({ patient: fixture.patient, dentist: fixture.dentist, clinic: fixture.clinic, purpose: 'consultation', isWalkIn: true });
+  const postVisit = (body: object, actor = fixture.admin) => request(app.getHttpServer()).post('/care/visits').set('x-fixture-user', actor).send(body);
+  const state = (id: string, value: string, actor: string, reason?: string) => request(app.getHttpServer()).patch(`/care/visits/${id}/state`).set('x-fixture-user', actor).send({ state: value, ...(reason ? { reason } : {}) });
+
+  it('checks in an identified walk-in and makes their care visible to the responsible dentist', async () => {
+    const result = await postVisit({ ...intake(), patient: fixture.literal }).expect(201);
+    expect(result.body).toMatchObject({ state: 'waiting', date: manilaDay(), isWalkIn: true, purpose: 'consultation', patient: { _id: fixture.literal } });
+    expect(result.body.activeKey).toBeUndefined();
+    const search = await get('/care/patients?search=Literal', fixture.dentist).expect(200);
+    expect(search.body.items[0]._id).toBe(fixture.literal);
+    const queue = await get('/care/queue', fixture.admin).expect(200);
+    expect(queue.body.map((visit: { _id: string }) => visit._id)).toEqual([result.body._id]);
+  });
+  it('rejects pending intake, another clinic, wrong dentist and anonymous patient payloads', async () => {
+    await users.updateOne({ _id: fixture.patient }, { $set: { status: 'pending' } });
+    await postVisit(intake()).expect(400);
+    await postVisit({ ...intake(), clinic: fixture.outside }).expect(403);
+    await postVisit({ ...intake(), patient: undefined }).expect(400);
+    await postVisit({ ...intake(), patient: fixture.literal, dentist: fixture.admin }).expect(400);
+    await postVisit(intake(), fixture.patient).expect(403);
+  });
+  it('serializes simultaneous patient check-in and preserves a single active visit', async () => {
+    const results = await Promise.all([postVisit(intake()), postVisit(intake())]);
+    expect(results.map(result => result.status).sort()).toEqual([201, 409]);
+    expect(await visits.countDocuments()).toBe(1);
+  });
+  it('starts care only for the responsible clinician and retains cancellation audit', async () => {
+    const first = await postVisit(intake()).expect(201);
+    await state(first.body._id, 'in_progress', fixture.admin).expect(403);
+    await state(first.body._id, 'in_progress', fixture.dentist).expect(200);
+    await state(first.body._id, 'cancelled', fixture.admin).expect(400);
+    const ended = await state(first.body._id, 'cancelled', fixture.admin, 'Patient had to leave').expect(200);
+    expect(ended.body.events).toHaveLength(3);
+    expect(ended.body.events[2].reason).toBe('Patient had to leave');
+    await state(first.body._id, 'in_progress', fixture.dentist).expect(409);
+    await postVisit(intake()).expect(201);
+    expect(await visits.countDocuments()).toBe(2);
+  });
+  it('uses confirmed matching today appointments and never creates a second appointment visit', async () => {
+    const appointment = await appointments.create({ patient: fixture.patient, dentist: fixture.dentist, clinic: fixture.clinic, date: manilaDay(), startTime: '10:00', endTime: '10:30', status: 'confirmed' });
+    const first = await postVisit({ ...intake(), appointment: appointment.id, isWalkIn: false }).expect(201);
+    expect(first.body.appointment).toBe(appointment.id);
+    expect(first.body.isWalkIn).toBe(false);
+    await state(first.body._id, 'cancelled', fixture.admin, 'Left').expect(200);
+    await postVisit({ ...intake(), appointment: appointment.id }).expect(409);
+    const pending = await appointments.create({ patient: fixture.patient, dentist: fixture.dentist, clinic: fixture.clinic, date: manilaDay(), startTime: '11:00', endTime: '11:30', status: 'pending' });
+    await postVisit({ ...intake(), appointment: pending.id }).expect(409);
+    await postVisit({ ...intake(), appointment: appointment.id, patient: fixture.literal }).expect(400);
+  });
+  it('keeps private queue/details protected and validates dates and states', async () => {
+    const first = await postVisit(intake()).expect(201);
+    await get(`/care/visits/${first.body._id}`, fixture.patient).expect(403);
+    await get(`/care/queue?clinic=${fixture.outside}`, fixture.admin).expect(403);
+    await get('/care/queue?date=2026-99-99', fixture.admin).expect(400);
+    await state(first.body._id, 'completed', fixture.dentist).expect(400);
+    await state(first.body._id, 'waiting', fixture.dentist).expect(400);
   });
 });

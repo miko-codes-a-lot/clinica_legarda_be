@@ -29,6 +29,10 @@ export class Clinic {
   @Prop()
   operatingHours: OperatingHour[];
 
+  // Shared transaction lock for intake, booking and clinic closure changes.
+  @Prop({ select: false })
+  scheduleRevision?: number;
+
   // virtual property i.e., not stored in db
   dentists?: User[];
 }

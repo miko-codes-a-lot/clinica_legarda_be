@@ -7,6 +7,7 @@ import { User } from '../users/entities/user.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { clinicMembershipFilter } from '../users/clinic-membership';
 import { careScope, requireCareClinic, requireCareStaff } from './care-policy';
+import { Visit } from './entities/visit.entity';
 
 export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address';
 export const CARE_CLINIC_FIELDS = '_id name address mobileNumber';
@@ -17,6 +18,7 @@ export class CareAccessService {
   constructor(
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
+    @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
   ) {}
 
   scope(actor: UserActor, clinic?: string): Record<string, unknown> { return careScope(actor, clinic); }
@@ -27,7 +29,8 @@ export class CareAccessService {
     requireCareStaff(actor);
     if (actor.role === 'super-admin' && !clinic) return { role: 'user' };
     const scope = careScope(actor, clinic);
-    const patients = await this.appointments.distinct('patient', scope).session(session ?? null);
+    const patients = (await this.appointments.distinct('patient', scope).session(session ?? null)).map(referenceId);
+    if (this.visits) patients.push(...(await this.visits.distinct('patient', scope).session(session ?? null)).map(referenceId));
     if (actor.role === 'dentist') return { role: 'user', _id: { $in: patients } };
     const clinics = clinic ? [referenceId(clinic)] : [...(actor.clinics ?? [])].map(referenceId);
     return { role: 'user', $or: [{ _id: { $in: patients } }, clinicMembershipFilter(clinics)] };
