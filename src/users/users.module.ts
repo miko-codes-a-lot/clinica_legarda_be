@@ -1,3 +1,4 @@
+import { LedgerEntry, LedgerEntrySchema } from '../ledger/entities/ledger-entry.entity';
 import { ProfilePictureGuard } from './profile-picture.guard';
 import {
   Appointment,
@@ -18,6 +19,7 @@ import { Visit, VisitSchema } from '../care/entities/visit.entity';
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Clinic.name, schema: ClinicSchema },
       { name: Visit.name, schema: VisitSchema },
+      { name: LedgerEntry.name, schema: LedgerEntrySchema },
     ]),
   ],
   controllers: [UsersController],

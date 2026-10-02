@@ -1,3 +1,4 @@
+import { LedgerEntry } from '../ledger/entities/ledger-entry.entity';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, FilterQuery, Model } from 'mongoose';
@@ -19,6 +20,7 @@ export class CareAccessService {
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
     @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
+    @InjectModel(LedgerEntry.name) private readonly ledger?: Model<LedgerEntry>,
   ) {}
 
   scope(actor: UserActor, clinic?: string): Record<string, unknown> { return careScope(actor, clinic); }
@@ -31,6 +33,7 @@ export class CareAccessService {
     const scope = careScope(actor, clinic);
     const patients = (await this.appointments.distinct('patient', scope).session(session ?? null)).map(referenceId);
     if (this.visits) patients.push(...(await this.visits.distinct('patient', scope).session(session ?? null)).map(referenceId));
+    if (actor.role !== 'dentist' && this.ledger) patients.push(...(await this.ledger.distinct('patient', scope).session(session ?? null)).map(referenceId));
     if (actor.role === 'dentist') return { role: 'user', _id: { $in: patients } };
     const clinics = clinic ? [referenceId(clinic)] : [...(actor.clinics ?? [])].map(referenceId);
     return { role: 'user', $or: [{ _id: { $in: patients } }, clinicMembershipFilter(clinics)] };
