@@ -8,6 +8,8 @@ import { AppointmentsService } from './appointments.service';
 import { Appointment, AppointmentSchema } from './entities/appointment.entity';
 import { AppointmentSchedulingService } from './appointment-scheduling.service';
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
+import { TreatmentCase } from '../care/entities/treatment-case.entity';
+import { Visit } from '../care/entities/visit.entity';
 
 describe('Appointment changes', () => {
   const actor = { sub: '000000000000000000000002', role: 'user' };
@@ -35,7 +37,9 @@ describe('Appointment changes', () => {
     });
     const module = await Test.createTestingModule({ providers: [AppointmentsService,
       { provide: getModelToken(Referral.name), useValue: {} },
-      { provide: getModelToken(User.name), useValue: {} },
+      { provide: getModelToken(User.name), useValue: { exists: () => ({ session: async () => ({ _id: actor.sub }) }) } },
+      { provide: getModelToken(TreatmentCase.name), useValue: {} },
+      { provide: getModelToken(Visit.name), useValue: { exists: () => ({ session: async () => null }) } },
       { provide: getModelToken(Appointment.name), useValue: {
         findById: () => {
           const query = { session: () => query, populate: () => query, exec: async () => current };

@@ -25,6 +25,10 @@ class AppointmentNoteDto {
 
 export class AppointmentUpsertDto {
   @IsOptional()
+  @IsMongoId()
+  careCase?: string;
+
+  @IsOptional()
   @IsBoolean()
   isWalkIn?: boolean;
 

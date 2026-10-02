@@ -81,6 +81,9 @@ export class Appointment {
   @Prop({ default: false })
   isWalkIn: boolean;
 
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'TreatmentCase' })
+  careCase?: mongoose.Types.ObjectId;
+
   @Prop({ type: AppointmentNote, default: () => ({}) })
   notes: AppointmentNote;
 

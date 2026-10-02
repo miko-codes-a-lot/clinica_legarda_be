@@ -33,7 +33,7 @@ export class PatientRecordsService {
     requireCareStaff(actor);
     const patient = await this.access.requirePatient(actor, id, clinic);
     const appointments = await this.appointments.find({ patient: patient._id, ...this.access.scope(actor, clinic) })
-      .select('_id clinic dentist date startTime endTime status isWalkIn services')
+      .select('_id clinic dentist date startTime endTime status isWalkIn services careCase')
       .populate({ path: 'clinic', select: CARE_CLINIC_FIELDS })
       .populate({ path: 'dentist', select: CARE_CLINICIAN_FIELDS })
       .populate({ path: 'services', select: '_id name' }).sort({ date: -1, startTime: -1 }).lean().exec();

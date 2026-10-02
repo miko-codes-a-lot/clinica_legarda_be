@@ -11,6 +11,8 @@ import {
   DentalCatalog,
   DentalCatalogSchema,
 } from '../dental-catalog/entities/dental-catalog.entity';
+import { Visit, VisitSchema } from '../care/entities/visit.entity';
+import { TreatmentCase, TreatmentCaseSchema } from '../care/entities/treatment-case.entity';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import {
       { name: User.name, schema: UserSchema }, // ✅ ADD
       { name: DentalCatalog.name, schema: DentalCatalogSchema },
       { name: Clinic.name, schema: ClinicSchema },
+      { name: Visit.name, schema: VisitSchema },
+      { name: TreatmentCase.name, schema: TreatmentCaseSchema },
     ]),
   ],
   controllers: [AppointmentsController],

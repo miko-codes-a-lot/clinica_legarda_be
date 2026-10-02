@@ -37,6 +37,9 @@ import {
 } from '../users/user-projections';
 import { calendarDay, ScheduleRequest } from './appointment-scheduling.rules';
 import { patientBookingStatuses } from '../users/patient-booking-policy';
+import { Visit } from '../care/entities/visit.entity';
+import { TreatmentCase } from '../care/entities/treatment-case.entity';
+import { assertCareCaseLink } from '../care/clinical-rules';
 
 @Injectable()
 export class AppointmentsService {
@@ -46,6 +49,8 @@ export class AppointmentsService {
     private readonly scheduling: AppointmentSchedulingService,
     @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(TreatmentCase.name) private readonly careCases?: Model<TreatmentCase>,
+    @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
   ) {}
 
   async create(dto: AppointmentUpsertDto, actor: UserActor) {
@@ -56,7 +61,7 @@ export class AppointmentsService {
       !(await this.appointmentModel.exists({
         dentist: referenceId(actor.sub),
         patient: referenceId(dto.patient),
-      }))
+      })) && !(this.visits && await this.visits.exists({ dentist: referenceId(actor.sub), patient: referenceId(dto.patient) }))
     ) {
       throw new ForbiddenException(
         'Dentists may book only their established patients.',
@@ -68,6 +73,7 @@ export class AppointmentsService {
       async (session) => {
         await this.requireBookablePatient(request.patient, actor, session);
         const validated = await this.scheduling.validate(request, session);
+        await this.validateCareCase(request.careCase, validated, session);
         const referral = await this.validateReferral(
           dto.referral,
           validated.patient,
@@ -163,7 +169,8 @@ export class AppointmentsService {
     if (actor.role !== 'admin') return;
     const id = referenceId(patient);
     const member = await this.userModel.exists({ _id: id, role: 'user', ...clinicMembershipFilter(adminClinicIds(actor)) }).session(session ?? null);
-    const history = member || await this.appointmentModel.exists({ patient: id, ...adminClinicScope(actor) }).session(session ?? null);
+    const history = member || await this.appointmentModel.exists({ patient: id, ...adminClinicScope(actor) }).session(session ?? null)
+      || (this.visits && await this.visits.exists({ patient: id, ...adminClinicScope(actor) }).session(session ?? null));
     if (!history) throw new ForbiddenException('This patient is outside your assigned clinics.');
   }
 
@@ -228,6 +235,7 @@ export class AppointmentsService {
           id,
         );
         const validated = await this.scheduling.validate(request, session, id);
+        await this.validateCareCase(request.careCase, validated, session);
         await this.writeCurrent(
           current,
           {
@@ -303,6 +311,7 @@ export class AppointmentsService {
         AppointmentStatus.PENDING,
         AppointmentStatus.CONFIRMED,
       ]);
+      await this.requireNoActiveVisit(current, session);
       const request = {
         ...this.scheduleRequest(current),
         date: calendarDay(dto.date),
@@ -311,6 +320,7 @@ export class AppointmentsService {
       };
       await this.requireBookablePatient(request.patient, actor, session);
       const validated = await this.scheduling.validate(request, session, id);
+      await this.validateCareCase(current.careCase?.toString(), validated, session);
       await this.writeCurrent(
         current,
         {
@@ -458,7 +468,11 @@ export class AppointmentsService {
           throw new ForbiddenException('Only the person who created this appointment may cancel it.');
         }
       }
+      if (status !== AppointmentStatus.CONFIRMED) await this.requireNoActiveVisit(current, session);
+      if (status === AppointmentStatus.COMPLETED && current.careCase)
+        throw new ConflictException('Complete the checked-in clinical visit to finish this treatment session.');
       if (status === AppointmentStatus.CONFIRMED) {
+        await this.validateCareCase(current.careCase?.toString(), this.scheduleRequest(current), session);
         await this.scheduling.validate(
           this.scheduleRequest(current),
           session,
@@ -496,6 +510,18 @@ export class AppointmentsService {
     };
   }
 
+  private async requireNoActiveVisit(current: AppointmentDocument, session: ClientSession) {
+    if (this.visits && await this.visits.exists({ appointment: current._id, state: { $in: ['waiting', 'in_progress'] } }).session(session))
+      throw new ConflictException('This appointment is checked in. Resolve its queue visit before changing the appointment.');
+  }
+
+  private async validateCareCase(value: string | undefined, request: { patient: string; dentist: string; clinic: string }, session: ClientSession) {
+    if (!value) return;
+    const careCase = this.careCases && await this.careCases.findById(referenceId(value)).session(session);
+    if (!careCase) throw new BadRequestException('Treatment case not found.');
+    assertCareCaseLink(careCase, request);
+  }
+
   /** State and history are one conditional write inside the participant transaction. */
   private async writeCurrent(
     current: AppointmentDocument,
@@ -521,7 +547,9 @@ export class AppointmentsService {
     if (!clinical && dto.isWalkIn !== undefined && dto.isWalkIn !== (current?.isWalkIn ?? false)) {
       throw new ForbiddenException('Only clinic staff may mark a visit as walk-in.');
     }
+    const careCase = dto.careCase ?? current?.careCase?.toString();
     return {
+      ...(careCase ? { careCase: referenceId(careCase) } : {}),
       isWalkIn: clinical ? dto.isWalkIn ?? current?.isWalkIn ?? false : current?.isWalkIn ?? false,
       clinic: dto.clinic,
       patient: actor.role === 'user' ? referenceId(actor.sub) : dto.patient,

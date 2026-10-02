@@ -10,6 +10,9 @@ import { PatientRecordsService } from './patient-records.service';
 import { Visit, VisitSchema } from './entities/visit.entity';
 import { VisitsService } from './visits.service';
 import { VisitsController } from './visits.controller';
+import { TreatmentCase, TreatmentCaseSchema } from './entities/treatment-case.entity';
+import { TreatmentCasesService } from './treatment-cases.service';
+import { TreatmentCasesController } from './treatment-cases.controller';
 
 @Module({
   imports: [MongooseModule.forFeature([
@@ -18,9 +21,10 @@ import { VisitsController } from './visits.controller';
     { name: Clinic.name, schema: ClinicSchema },
     { name: DentalCatalog.name, schema: DentalCatalogSchema },
     { name: Visit.name, schema: VisitSchema },
+    { name: TreatmentCase.name, schema: TreatmentCaseSchema },
   ])],
-  controllers: [PatientRecordsController, VisitsController],
-  providers: [CareAccessService, PatientRecordsService, VisitsService],
+  controllers: [PatientRecordsController, VisitsController, TreatmentCasesController],
+  providers: [CareAccessService, PatientRecordsService, VisitsService, TreatmentCasesService],
   exports: [CareAccessService],
 })
 export class CareModule {}

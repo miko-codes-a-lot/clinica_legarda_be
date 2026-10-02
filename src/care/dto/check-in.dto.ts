@@ -6,6 +6,7 @@ export class CheckInDto {
   @IsMongoId() clinic: string;
   @IsMongoId() dentist: string;
   @IsOptional() @IsMongoId() appointment?: string;
+  @IsOptional() @IsMongoId() careCase?: string;
   @IsIn(['consultation', 'treatment']) purpose: VisitPurpose;
   @IsOptional() @IsBoolean() isWalkIn?: boolean;
 }

@@ -13,6 +13,9 @@ import { CheckInDto } from './dto/check-in.dto';
 import { VisitQueryDto, VisitTransitionDto } from './dto/visit-transition.dto';
 import { Visit, VisitDocument } from './entities/visit.entity';
 import { assertAppointmentCheckIn, assertIntakePatient, assertQueueTransition, manilaDay } from './visit-rules';
+import { VisitRecordDto } from './dto/visit-record.dto';
+import { assertCareCaseLink, assertClinicalRecordWrite } from './clinical-rules';
+import { TreatmentCase } from './entities/treatment-case.entity';
 
 @Injectable()
 export class VisitsService implements OnModuleInit {
@@ -22,6 +25,7 @@ export class VisitsService implements OnModuleInit {
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Clinic.name) private readonly clinics: Model<Clinic>,
     @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
+    @InjectModel(TreatmentCase.name) private readonly cases?: Model<TreatmentCase>,
   ) {}
   async onModuleInit() { await this.visits.init(); }
 
@@ -41,18 +45,30 @@ export class VisitsService implements OnModuleInit {
         const dentist = await this.users.exists({ _id: dentistId, role: 'dentist', status: 'confirmed', ...clinicMembershipFilter(clinicId) }).session(session);
         if (!dentist) throw new BadRequestException('Select a confirmed dentist assigned to this clinic.');
         let walkIn = dto.isWalkIn ?? !dto.appointment;
+        let caseId = dto.careCase ? referenceId(dto.careCase) : undefined;
         if (dto.appointment) {
           const appointment = await this.appointments.findById(referenceId(dto.appointment)).session(session);
           if (!appointment) throw new NotFoundException('Appointment not found.');
           if (!sameId(appointment.patient, patientId) || !sameId(appointment.clinic, clinicId) || !sameId(appointment.dentist, dentistId))
             throw new BadRequestException('The appointment must belong to this patient, clinic and dentist.');
           assertAppointmentCheckIn(appointment, day);
+          if (appointment.careCase) {
+            if (caseId && !sameId(caseId, appointment.careCase)) throw new BadRequestException('The visit must use its appointment treatment case.');
+            caseId = referenceId(appointment.careCase);
+          }
           walkIn = dto.isWalkIn ?? appointment.isWalkIn;
         } else if (!walkIn) throw new BadRequestException('Unscheduled check-in must be marked as a walk-in.');
+        if (caseId) {
+          const careCase = this.cases && await this.cases.findById(caseId).session(session);
+          if (!careCase) throw new BadRequestException('Treatment case not found.');
+          assertCareCaseLink(careCase, { patient: patientId, dentist: dentistId, clinic: clinicId });
+          if (dto.appointment) await this.appointments.updateOne({ _id: referenceId(dto.appointment) }, { $set: { careCase: caseId } }, { session });
+        }
         const now = new Date();
         const [visit] = await this.visits.create([{
           patient: patientId, dentist: dentistId, clinic: clinicId,
-          ...(dto.appointment ? { appointment: referenceId(dto.appointment) } : {}),
+          ...(dto.appointment ? { appointment: referenceId(dto.appointment), appointmentKey: referenceId(dto.appointment) } : {}),
+          ...(caseId ? { careCase: caseId } : {}),
           date: day, checkedInAt: now, purpose: dto.purpose, isWalkIn: walkIn,
           activeKey: `${patientId}:${clinicId}`, createdBy: referenceId(actor.sub),
           events: [{ state: 'waiting', actor: referenceId(actor.sub), at: now }],
@@ -81,6 +97,7 @@ export class VisitsService implements OnModuleInit {
     if (query.patient) await this.access.requirePatient(actor, query.patient, query.clinic);
     return this.populate(this.visits.find({ ...this.access.scope(actor, query.clinic),
       ...(query.patient ? { patient: referenceId(query.patient) } : {}),
+      ...(query.appointment ? { appointment: referenceId(query.appointment) } : {}),
       ...(queue || query.date ? { date: query.date ?? manilaDay() } : {}),
     })).sort(queue ? { checkedInAt: 1, _id: 1 } : { checkedInAt: -1, _id: -1 }).lean().exec();
   }
@@ -115,11 +132,40 @@ export class VisitsService implements OnModuleInit {
       const now = new Date();
       const result = await this.visits.updateOne({ _id: visit._id, revision: visit.revision, state: visit.state }, {
         $set: { state: dto.state, ...(dto.state === 'in_progress' ? { startedAt: now } : { endedAt: now }) },
-        ...(dto.state === 'cancelled' ? { $unset: { activeKey: 1 } } : {}),
+        ...(dto.state === 'cancelled' ? { $unset: { activeKey: 1, appointmentKey: 1 } } : {}),
         $inc: { revision: 1 },
         $push: { events: { state: dto.state, at: now, actor: referenceId(actor.sub), ...(dto.reason ? { reason: dto.reason.trim() } : {}) } },
       }, { session });
       if (!result.modifiedCount) throw new ConflictException('The visit changed. Reload and try again.');
+    });
+    return this.findOne(actor, id);
+  }
+
+  async saveRecord(actor: UserActor, id: string, dto: VisitRecordDto) {
+    await this.visits.db.transaction(async session => {
+      const current = await this.requireVisit(actor, id, session);
+      await this.lockParticipants([referenceId(current.patient), referenceId(current.dentist)], referenceId(current.clinic), session);
+      assertClinicalRecordWrite(current, actor, dto.revision, dto.complete, dto.summary);
+      if (dto.treatments.some(item => !item.description.trim())) throw new BadRequestException('Treatment descriptions cannot be blank.');
+      if (dto.complete && current.purpose === 'treatment' && !dto.treatments.length) throw new BadRequestException('Record at least one performed treatment before completing a treatment session.');
+      const now = new Date();
+      const updated = await this.visits.updateOne({ _id: current._id, revision: dto.revision, state: 'in_progress' }, {
+        $set: { assessment: dto.assessment.trim(), treatments: dto.treatments.map(item => ({ description: item.description.trim(), tooth: item.tooth?.trim(), notes: item.notes?.trim() })),
+          summary: dto.summary.trim(), aftercare: dto.aftercare.trim(), nextSteps: dto.nextSteps.trim(),
+          clinicalAuthor: referenceId(actor.sub), clinicalUpdatedAt: now,
+          ...(dto.complete ? { state: 'completed', endedAt: now } : {}),
+        },
+        ...(dto.complete ? { $unset: { activeKey: 1 } } : {}),
+        $inc: { revision: 1 },
+        $push: { events: { state: dto.complete ? 'completed' : 'record_saved', at: now, actor: referenceId(actor.sub) } },
+      }, { session, runValidators: true });
+      if (!updated.modifiedCount) throw new ConflictException('The clinical record changed. Reload before saving.');
+      if (dto.complete && current.appointment) {
+        const appointment = await this.appointments.updateOne({ _id: current.appointment, status: 'confirmed' }, {
+          $set: { status: 'completed' }, $push: { history: { action: 'Appointment completed with visit summary.', actorId: referenceId(actor.sub), actorRole: actor.role, actorName: actor.username } },
+        }, { session, runValidators: true });
+        if (!appointment.modifiedCount) throw new ConflictException('The linked appointment changed. Review its status before completing care.');
+      }
     });
     return this.findOne(actor, id);
   }

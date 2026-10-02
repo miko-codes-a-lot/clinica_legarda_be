@@ -9,6 +9,7 @@ import { UsersController } from './users.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { User, UserSchema } from './entities/user.entity';
 import { Clinic, ClinicSchema } from 'src/clinics/entities/clinic.entity';
+import { Visit, VisitSchema } from '../care/entities/visit.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { Clinic, ClinicSchema } from 'src/clinics/entities/clinic.entity';
       { name: User.name, schema: UserSchema },
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Clinic.name, schema: ClinicSchema },
+      { name: Visit.name, schema: VisitSchema },
     ]),
   ],
   controllers: [UsersController],

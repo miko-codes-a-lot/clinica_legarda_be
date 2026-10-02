@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './entities/user.entity';
-import mongoose, { FilterQuery, HydratedDocument, Model } from 'mongoose';
+import mongoose, { ClientSession, FilterQuery, HydratedDocument, Model } from 'mongoose';
 import { UserUpsertDto } from './dto/user-upsert.dto';
 import * as bcrypt from 'bcrypt';
 import { Clinic } from 'src/clinics/entities/clinic.entity';
@@ -21,6 +21,7 @@ import {
 } from './user-projections';
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
 import { adminClinicIds, adminClinicScope, visibleClinicMemberships } from '../auth/clinic-policy';
+import { Visit } from '../care/entities/visit.entity';
 
 @Injectable()
 export class UsersService {
@@ -29,6 +30,7 @@ export class UsersService {
     @InjectModel(Clinic.name) private readonly clinicModel: Model<Clinic>,
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
+    @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
   ) {}
 
   findByOneUsername(username: string) {
@@ -75,9 +77,10 @@ export class UsersService {
     }
     const patientIds = isAdmin(actor)
       ? undefined
-      : await this.appointmentModel.distinct('patient', {
+      : (await this.appointmentModel.distinct('patient', {
           dentist: referenceId(actor.sub),
-        });
+        })).map(referenceId);
+    if (patientIds && this.visits) patientIds.push(...(await this.visits.distinct('patient', { dentist: referenceId(actor.sub) })).map(referenceId));
     return this.userModel
       .find({ role: 'user', ...(patientIds && { _id: { $in: patientIds } }) })
       .select(PATIENT_DIRECTORY_FIELDS);
@@ -123,22 +126,24 @@ export class UsersService {
       const memberships = adminClinicIds(actor);
       if (user.role !== 'super-admin' && assignedClinicIds(user).some(id => memberships.includes(referenceId(id)))) return;
       if (user.role === 'user' && await this.appointmentModel.exists({ patient: user._id, ...adminClinicScope(actor) })) return;
+      if (user.role === 'user' && this.visits && await this.visits.exists({ patient: user._id, ...adminClinicScope(actor) })) return;
       throw new ForbiddenException('This user is outside your assigned clinics.');
     }
     if (
       actor?.role === 'dentist' &&
       user.role === 'user' &&
-      (await this.appointmentModel.exists({
+      ((await this.appointmentModel.exists({
         dentist: referenceId(actor.sub),
         patient: user._id,
-      }))
+      })) || (this.visits && await this.visits.exists({ dentist: referenceId(actor.sub), patient: user._id })))
     )
       return;
     throw new ForbiddenException('You cannot access this profile.');
   }
 
   private async adminPatientFilter(actor: UserActor) {
-    const patients = await this.appointmentModel.distinct('patient', adminClinicScope(actor));
+    const patients = (await this.appointmentModel.distinct('patient', adminClinicScope(actor))).map(referenceId);
+    if (this.visits) patients.push(...(await this.visits.distinct('patient', adminClinicScope(actor))).map(referenceId));
     return { $or: [{ _id: { $in: patients } }, clinicMembershipFilter(adminClinicIds(actor))] };
   }
 
@@ -382,14 +387,22 @@ export class UsersService {
       writeCondition.status = existing.status;
       writeCondition.role = existing.role;
     }
-    const saved = await this.persist(update, id, writeCondition);
+    const saved = existing && update.role !== undefined && update.role !== existing.role && this.visits
+      ? await this.userModel.db.transaction(async session => {
+        const locked = await this.userModel.updateOne({ _id: existing._id, role: existing.role }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
+        if (!locked.matchedCount) throw new ConflictException('The account changed. Reload before changing its role.');
+        await this.requireNoCareHistory(referenceId(existing._id), session);
+        return this.persist(update, id, writeCondition, session);
+      })
+      : await this.persist(update, id, writeCondition);
     return saved ? this.visibleUser(saved, actor) : saved;
   }
 
   private async hasOutsideClinicAccess(user: User, actor: UserActor) {
     const clinics = adminClinicIds(actor);
     return assignedClinicIds(user).some(clinic => !clinics.includes(referenceId(clinic))) ||
-      !!await this.appointmentModel.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } });
+      !!await this.appointmentModel.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } }) ||
+      !!(this.visits && await this.visits.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } }));
   }
 
   /** Public registration has an explicit, nonprivileged write path. */
@@ -441,6 +454,7 @@ export class UsersService {
     doc: Record<string, unknown>,
     id?: string,
     writeCondition: FilterQuery<User> = {},
+    session?: ClientSession,
   ) {
     if (typeof doc.password === 'string' && doc.password) {
       doc.password = await bcrypt.hash(doc.password, 10);
@@ -449,10 +463,11 @@ export class UsersService {
     }
 
     const uniqueFields = ['username', 'emailAddress', 'mobileNumber'].filter(field => typeof doc[field] === 'string' && !!doc[field]);
-    const dup = uniqueFields.length ? await this.userModel.findOne({
+    const duplicateQuery = uniqueFields.length ? this.userModel.findOne({
       ...(id && { _id: { $ne: id } }),
       $or: uniqueFields.map(field => ({ [field]: doc[field] })),
     }) : null;
+    const dup = duplicateQuery ? (session ? await duplicateQuery.session(session) : await duplicateQuery) : null;
     if (dup) {
       if (doc.username && dup.username === doc.username) {
         throw new BadRequestException(
@@ -485,7 +500,7 @@ export class UsersService {
           $set: doc,
           ...(Object.keys(unset).length && { $unset: unset }),
         },
-        { upsert: !id, new: true, runValidators: true },
+        { upsert: !id, new: true, runValidators: true, ...(session ? { session } : {}) },
       )
       .populate('clinic clinics');
     if (!saved && Object.keys(writeCondition).length > 0) {
@@ -515,11 +530,24 @@ export class UsersService {
       throw new BadRequestException('Super admin accounts cannot be deleted.');
     }
 
-    await this.userModel.findByIdAndDelete(id);
+    if (this.visits) {
+      await this.userModel.db.transaction(async session => {
+        const locked = await this.userModel.updateOne({ _id: user._id, role: user.role }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
+        if (!locked.matchedCount) throw new ConflictException('The account changed. Reload before deleting it.');
+        await this.requireNoCareHistory(id, session, true);
+        await this.userModel.findByIdAndDelete(id, { session });
+      });
+    } else await this.userModel.findByIdAndDelete(id);
 
     return {
       message: 'User deleted successfully.',
     };
+  }
+
+  private async requireNoCareHistory(id: string, session: ClientSession, includeAudit = false) {
+    if (this.visits && await this.visits.exists({ $or: [
+      { patient: id }, { dentist: id }, ...(includeAudit ? [{ createdBy: id }, { 'events.actor': id }, { clinicalAuthor: id }] : []),
+    ] }).session(session)) throw new ConflictException('This account has retained care history. Keep its identity and role so the records remain accessible.');
   }
 
   async completeEmailVerification(user: User) {
