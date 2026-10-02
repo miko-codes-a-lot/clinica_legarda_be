@@ -76,6 +76,14 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     expect(JSON.stringify(availability.body)).not.toMatch(/private closure reason|createdBy|affectedAppointments|reopenReason/);
     await post('/clinic-closures',closure()).expect(409);
   });
+  it('keeps historical closure appointment details scoped after an appointment moves clinics', async () => {
+    const c = await post('/clinic-closures',closure()).expect(201);
+    await request(app.getHttpServer()).put(`/appointments/${f.appointment}`).set('x-fixture-user',f.super).send({ ...booking(), clinic:f.outside }).expect(200);
+    await get(`/appointments/${f.appointment}`).expect(403);
+    const detail = await get(`/clinic-closures/${c.body.closure._id}`).expect(200);
+    expect(detail.body.closure.affectedAppointments).toContain(f.appointment);
+    expect(detail.body.appointments).toEqual([]);
+  });
   it('blocks create, update, approval and overlapping reschedule, then permits a new open interval', async () => {
     await post('/clinic-closures',closure()).expect(201);
     await post('/appointments',booking()).expect(409);

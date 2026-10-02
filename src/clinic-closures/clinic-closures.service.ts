@@ -42,15 +42,15 @@ export class ClinicClosuresService implements OnModuleInit {
     }).session(session ?? null).exec();
     return candidates.filter(row => closureOverlaps(dto, row.date.toISOString().slice(0,10), row.startTime, row.endTime));
   }
-  private appointmentRows(ids: unknown[]) {
-    return this.appointments.find({ _id: { $in: ids } }).select('_id patient dentist clinic date startTime endTime status disruption')
+  private appointmentRows(ids: unknown[], actor: UserActor, clinic: string) {
+    return this.appointments.find({ $and: [{ _id: { $in: ids }, clinic: referenceId(clinic) }, this.scope(actor)] }).select('_id patient dentist clinic date startTime endTime status disruption')
       .populate([{ path: 'patient', select: '_id firstName lastName username' }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }, { path: 'clinic', select: CARE_CLINIC_FIELDS }]).sort({ date: 1, startTime: 1 }).lean().exec();
   }
   async preview(actor: UserActor, dto: ClinicClosureDto) {
     this.staff(actor, dto.clinic); assertClosureRange(dto);
     if (!dto.reason.trim()) throw new BadRequestException('Enter a closure reason.');
     if (!await this.clinics.exists({ _id: referenceId(dto.clinic) })) throw new NotFoundException('Clinic not found.');
-    const rows = await this.affected(dto); return { appointments: await this.appointmentRows(rows.map(row => row._id)), total: rows.length };
+    const rows = await this.affected(dto); return { appointments: await this.appointmentRows(rows.map(row => row._id), actor, dto.clinic), total: rows.length };
   }
   async create(actor: UserActor, dto: ClinicClosureDto) {
     this.staff(actor, dto.clinic); assertClosureRange(dto); if (!dto.reason.trim()) throw new BadRequestException('Enter a closure reason.');
@@ -82,7 +82,7 @@ export class ClinicClosuresService implements OnModuleInit {
   async findOne(actor: UserActor, id: string) {
     const closure = await this.closures.findById(referenceId(id)).populate({ path: 'clinic', select: CARE_CLINIC_FIELDS }).lean();
     if (!closure) throw new NotFoundException('Clinic closure not found.'); this.staff(actor, referenceId(closure.clinic));
-    return { closure, appointments: await this.appointmentRows(closure.affectedAppointments) };
+    return { closure, appointments: await this.appointmentRows(closure.affectedAppointments, actor, referenceId(closure.clinic)) };
   }
   async reopen(actor: UserActor, id: string, reason: string) {
     if (!reason.trim()) throw new BadRequestException('Enter why the clinic is reopening.');
