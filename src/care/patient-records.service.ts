@@ -7,6 +7,7 @@ import { UserActor } from '../auth/role-policy';
 import { CareAccessService, CARE_CLINIC_FIELDS, CARE_CLINICIAN_FIELDS, CARE_PERSON_FIELDS } from './care-access.service';
 import { patientSearchFilter, requireCareStaff } from './care-policy';
 import { PatientSearchDto } from './dto/patient-search.dto';
+import { patientSearchOptions } from './patient-search-options';
 
 @Injectable()
 export class PatientRecordsService {
@@ -18,11 +19,12 @@ export class PatientRecordsService {
 
   async search(actor: UserActor, query: PatientSearchDto) {
     requireCareStaff(actor);
-    const filter = { $and: [await this.access.patientFilter(actor, query.clinic), patientSearchFilter(query.search)] };
+    const options = patientSearchOptions(query);
+    const filter = { $and: [await this.access.patientFilter(actor, query.clinic), patientSearchFilter(query.search), options.filter] };
     const page = query.page ?? 1;
     const pageSize = 20;
     const [items, total] = await Promise.all([
-      this.users.find(filter).select(CARE_PERSON_FIELDS).sort({ lastName: 1, firstName: 1, _id: 1 })
+      this.users.find(filter).select(CARE_PERSON_FIELDS).sort(options.sort)
         .skip((page - 1) * pageSize).limit(pageSize).lean().exec(),
       this.users.countDocuments(filter).exec(),
     ]);

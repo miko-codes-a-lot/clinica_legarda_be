@@ -157,6 +157,27 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     expect(page.body).toMatchObject({ items: [], page: 2, pageSize: 20, total: 3 });
   });
 
+  it('applies account, registration and allowlisted sorting across all scoped pages', async () => {
+    await users.create(Array.from({ length: 25 }, (_, index) => ({ role: 'user', username: `page${String(index).padStart(2, '0')}`, firstName: 'Page', lastName: String(index).padStart(2, '0'), clinics: [fixture.clinic], status: 'confirmed', isWalkIn: true })));
+    await users.create({ role: 'user', username: 'page99.outside', clinics: [fixture.outside], status: 'confirmed', isWalkIn: true });
+    const query = 'status=confirmed&registration=walk_in&sortBy=username&direction=desc';
+    const first = await get(`/care/patients?${query}`, fixture.admin).expect(200);
+    const second = await get(`/care/patients?${query}&page=2`, fixture.admin).expect(200);
+    expect(first.body).toMatchObject({ total: 25, page: 1, pageSize: 20 });
+    expect(first.body.items[0].username).toBe('page24');
+    expect(second.body.items.map((item: { username: string }) => item.username)).toEqual(['page04', 'page03', 'page02', 'page01', 'page00']);
+    expect((await get(`/care/patients?${query}`, fixture.noClinic).expect(200)).body.total).toBe(0);
+    await get(`/care/patients?${query}&clinic=${fixture.outside}`, fixture.admin).expect(403);
+    const standard = await get('/care/patients?status=confirmed&registration=standard', fixture.admin).expect(200);
+    expect(standard.body.items.map((item: { _id: string }) => item._id)).toEqual([fixture.patient]);
+  });
+
+  it('rejects unsupported list query fields without exposing credential sort keys', async () => {
+    for (const query of ['status=bad', 'registration=true', 'sortBy=password', 'direction=sideways']) {
+      await get(`/care/patients?${query}`, fixture.admin).expect(400);
+    }
+  });
+
   const intake = () => ({ patient: fixture.patient, dentist: fixture.dentist, clinic: fixture.clinic, purpose: 'consultation', isWalkIn: true });
   const postVisit = (body: object, actor = fixture.admin) => request(app.getHttpServer()).post('/care/visits').set('x-fixture-user', actor).send(body);
   const state = (id: string, value: string, actor: string, reason?: string) => request(app.getHttpServer()).patch(`/care/visits/${id}/state`).set('x-fixture-user', actor).send({ state: value, ...(reason ? { reason } : {}) });
