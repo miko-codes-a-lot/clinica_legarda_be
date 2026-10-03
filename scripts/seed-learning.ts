@@ -187,18 +187,20 @@ function createSeedData() {
   const clinics: SeedDocument[] = [
     {
       _id: ids.clinics.legarda,
-      name: 'Clinica Legarda Dental Center',
-      address: 'Unit 2B, 241 Legarda Street, Sampaloc, Manila',
-      mobileNumber: '+639171110101',
-      emailAddress: 'appointments.legarda@example.test',
+      name: 'R. Nañez Dental Clinic — Demo branch 1',
+      nameKey: 'r. nañez dental clinic — demo branch 1',
+      address: 'Presentation demo location 1 — Pasig City',
+      mobileNumber: '09092535715',
+      emailAddress: 'rnanezdentalclinic@gmail.com',
       operatingHours: extendedHours,
     },
     {
       _id: ids.clinics.sampaloc,
-      name: 'Sampaloc Family Dental Clinic',
-      address: 'Ground Floor, 88 Dapitan Street, Sampaloc, Manila',
-      mobileNumber: '+639171110102',
-      emailAddress: 'appointments.sampaloc@example.test',
+      name: 'R. Nañez Dental Clinic',
+      nameKey: 'r. nañez dental clinic',
+      address: 'Block 4 Lot 1 Megaville, Eusebio Avenue, Nagpayong II, Pinagbuhatan, Pasig City',
+      mobileNumber: '09092535715',
+      emailAddress: 'rnanezdentalclinic@gmail.com',
       operatingHours: weekdayHours,
     },
   ];
@@ -216,12 +218,12 @@ function createSeedData() {
     },
     {
       _id: ids.services.filling,
-      name: 'Tooth Filling',
+      name: 'Tooth Restoration',
       duration: 60,
     },
     {
       _id: ids.services.extraction,
-      name: 'Simple Tooth Extraction',
+      name: 'Tooth Extraction',
       duration: 60,
     },
     {

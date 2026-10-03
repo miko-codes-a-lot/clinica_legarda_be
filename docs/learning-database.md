@@ -1,6 +1,6 @@
 # Learning database seed
 
-The learning seed recreates a useful fictional Clinica Legarda dataset without
+The learning seed recreates a useful R. Nañez Dental Clinic presentation dataset without
 dropping the database or deleting unrelated records.
 
 It manages these collections in dependency order:
@@ -73,8 +73,40 @@ Learning accounts:
 | Patient     | Sam Luis Navarro      | `sam.navarro`    |
 | Patient     | Taylor Anne Mendoza   | `taylor.mendoza` |
 
-All names, email addresses, phone numbers, addresses, clinical notes, and
-appointments are fictional learning data.
+Patient identities, clinical notes and appointments are fictional learning data.
+The main clinic contact details were supplied by the client; other clinic records
+are explicitly labelled demo branches for the school presentation.
+
+## Client catalog and existing database rebrand
+
+The rebrand reads the authoritative client content from the sibling frontend's
+`src/app/_shared/clinic-profile.json`. Pass `--profile /absolute/path/clinic-profile.json`
+when using a separately deployed copy. Run the plan first:
+
+```sh
+npm run seed:rnanez
+npm run seed:rnanez:test
+npm run seed:rnanez -- --apply --backup-dir /absolute/path/private-backups
+```
+
+It renames clinic records in place, keeps their IDs/schedules/assignments, maps
+service aliases without replacing referenced IDs, and adds missing client services.
+Existing service durations remain intact. Newly added basic services use 30 minutes,
+prosthetic/periodontal services use 60 minutes (Night Guard 30), and Braces/surgery
+use 120 minutes as editable presentation scheduling defaults. These are not a
+promise of clinical treatment time. The interview described basic visits of
+20–30 minutes and complicated procedures of 1–2 hours.
+
+The migration defaults to read-only, rejects ambiguous alias collisions, requires
+a backup directory before applying, and verifies all other collections and retained
+clinic/service fields inside the transaction. Backups use MongoDB Extended JSON
+with private permissions. A second run must report zero changes. The LIVE target
+also requires `--target live --allow-live` and uses the server's existing environment
+configuration without printing it. Do not run the broader learning seed against LIVE
+to rebrand it: that seed updates accounts and appointment fixtures.
+
+After creating a fresh local learning database, run this rebrand to add the supplied
+16-treatment catalog. It preserves the existing consultation/check-up entries.
 
 ## Custom local target
 

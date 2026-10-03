@@ -1,3 +1,4 @@
+import { CLINIC_NAME } from '../_shared/clinic-brand';
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from 'src/users/users.service';
@@ -151,7 +152,7 @@ export class AuthService {
     try {
       await sendViaSemaphore(
         user.mobileNumber,
-        `Your Clinica Legarda password reset code is ${otp}. Valid for 5 minutes.`,
+        `Your ${CLINIC_NAME} password reset code is ${otp}. Valid for 5 minutes.`,
       );
     } catch (err) {
       console.error('Semaphore SMS failed:', err);

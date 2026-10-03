@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { google } from 'googleapis';
 import configuration from 'src/_shared/configuration';
+import { CLINIC_NAME } from '../_shared/clinic-brand';
 
 @Injectable()
 export class MailerService {
@@ -15,7 +16,7 @@ export class MailerService {
   async sendOtp(to: string, code: string): Promise<void> {
     const { from } = configuration().gmail;
 
-    const subject = 'Login OTP - Clinica Legarda';
+    const subject = `Login OTP - ${CLINIC_NAME}`;
     const html = `
 <!DOCTYPE html>
 <html>
@@ -30,8 +31,8 @@ export class MailerService {
         <table width="480" cellpadding="0" cellspacing="0" style="max-width: 480px; width: 100%;">
           <!-- Header -->
           <tr>
-            <td style="background: linear-gradient(135deg, #1976d2, #63a4ff); padding: 32px 40px; border-radius: 12px 12px 0 0; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">Clinica Legarda</h1>
+            <td style="background: linear-gradient(135deg, #0f766e, #67b5a7); padding: 32px 40px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">${CLINIC_NAME}</h1>
             </td>
           </tr>
           <!-- Body -->
@@ -43,8 +44,8 @@ export class MailerService {
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td align="center" style="padding: 0 0 24px;">
-                    <div style="display: inline-block; background-color: #f5f5f5; border: 2px solid #1976d2; border-radius: 8px; padding: 16px 32px;">
-                      <span style="font-size: 36px; font-weight: 700; letter-spacing: 10px; color: #1976d2;">${code}</span>
+                    <div style="display: inline-block; background-color: #f5f5f5; border: 2px solid #0f766e; border-radius: 8px; padding: 16px 32px;">
+                      <span style="font-size: 36px; font-weight: 700; letter-spacing: 10px; color: #0f766e;">${code}</span>
                     </div>
                   </td>
                 </tr>
@@ -55,7 +56,7 @@ export class MailerService {
           <!-- Footer -->
           <tr>
             <td style="padding: 24px 40px; text-align: center;">
-              <p style="margin: 0 0 4px; color: #999999; font-size: 12px;">Clinica Legarda</p>
+              <p style="margin: 0 0 4px; color: #999999; font-size: 12px;">${CLINIC_NAME}</p>
               <p style="margin: 0; color: #999999; font-size: 11px;">This is an automated message. Please do not reply to this email.</p>
             </td>
           </tr>
@@ -81,9 +82,9 @@ export class MailerService {
     html: string,
   ): string {
     const message = [
-      `From: ${from}`,
+      `From: =?UTF-8?B?${Buffer.from(CLINIC_NAME).toString('base64')}?= <${from}>`,
       `To: ${to}`,
-      `Subject: ${subject}`,
+      `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
       'MIME-Version: 1.0',
       'Content-Type: text/html; charset=UTF-8',
       '',
