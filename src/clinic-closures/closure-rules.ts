@@ -1,5 +1,10 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { assertCalendarDate } from '../ledger/ledger-rules';
+
+function assertCalendarDate(value: string): void {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value)
+    throw new BadRequestException('Enter a valid calendar date as YYYY-MM-DD.');
+}
 export interface ClosureInterval { startDate: string; endDate: string; startTime: string; endTime: string; status?: string; }
 export function assertClosureRange(range: ClosureInterval) {
   assertCalendarDate(range.startDate); assertCalendarDate(range.endDate);

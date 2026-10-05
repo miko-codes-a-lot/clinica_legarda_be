@@ -1,4 +1,3 @@
-import { LedgerEntry } from '../ledger/entities/ledger-entry.entity';
 import {
   BadRequestException,
   ConflictException,
@@ -32,7 +31,6 @@ export class UsersService {
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
     @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
-    @InjectModel(LedgerEntry.name) private readonly ledger?: Model<LedgerEntry>,
   ) {}
 
   findByOneUsername(username: string) {
@@ -128,7 +126,6 @@ export class UsersService {
       const memberships = adminClinicIds(actor);
       if (user.role !== 'super-admin' && assignedClinicIds(user).some(id => memberships.includes(referenceId(id)))) return;
       if (user.role === 'user' && await this.appointmentModel.exists({ patient: user._id, ...adminClinicScope(actor) })) return;
-      if (user.role === 'user' && this.ledger && await this.ledger.exists({ patient: user._id, ...adminClinicScope(actor) })) return;
       if (user.role === 'user' && this.visits && await this.visits.exists({ patient: user._id, ...adminClinicScope(actor) })) return;
       throw new ForbiddenException('This user is outside your assigned clinics.');
     }
@@ -146,7 +143,6 @@ export class UsersService {
 
   private async adminPatientFilter(actor: UserActor) {
     const patients = (await this.appointmentModel.distinct('patient', adminClinicScope(actor))).map(referenceId);
-    if (this.ledger) patients.push(...(await this.ledger.distinct('patient', adminClinicScope(actor))).map(referenceId));
     if (this.visits) patients.push(...(await this.visits.distinct('patient', adminClinicScope(actor))).map(referenceId));
     return { $or: [{ _id: { $in: patients } }, clinicMembershipFilter(adminClinicIds(actor))] };
   }
@@ -391,7 +387,7 @@ export class UsersService {
       writeCondition.status = existing.status;
       writeCondition.role = existing.role;
     }
-    const saved = existing && update.role !== undefined && update.role !== existing.role && (this.visits || this.ledger)
+    const saved = existing && update.role !== undefined && update.role !== existing.role && this.visits
       ? await this.userModel.db.transaction(async session => {
         const locked = await this.userModel.updateOne({ _id: existing._id, role: existing.role }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
         if (!locked.matchedCount) throw new ConflictException('The account changed. Reload before changing its role.');
@@ -406,8 +402,7 @@ export class UsersService {
     const clinics = adminClinicIds(actor);
     return assignedClinicIds(user).some(clinic => !clinics.includes(referenceId(clinic))) ||
       !!await this.appointmentModel.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } }) ||
-      !!(this.visits && await this.visits.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } })) ||
-      !!(this.ledger && await this.ledger.exists({ patient: user._id, clinic: { $nin: clinics } }));
+      !!(this.visits && await this.visits.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } }));
   }
 
   /** Public registration has an explicit, nonprivileged write path. */
@@ -535,7 +530,7 @@ export class UsersService {
       throw new BadRequestException('Super admin accounts cannot be deleted.');
     }
 
-    if (this.visits || this.ledger) {
+    if (this.visits) {
       await this.userModel.db.transaction(async session => {
         const locked = await this.userModel.updateOne({ _id: user._id, role: user.role }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
         if (!locked.matchedCount) throw new ConflictException('The account changed. Reload before deleting it.');
@@ -550,7 +545,6 @@ export class UsersService {
   }
 
   private async requireNoCareHistory(id: string, session: ClientSession, includeAudit = false) {
-    if (this.ledger && await this.ledger.exists({ patient: id }).session(session)) throw new ConflictException('This patient has retained financial history. Keep its identity and role.');
     if (this.visits && await this.visits.exists({ $or: [
       { patient: id }, { dentist: id }, ...(includeAudit ? [{ createdBy: id }, { 'events.actor': id }, { clinicalAuthor: id }] : []),
     ] }).session(session)) throw new ConflictException('This account has retained care history. Keep its identity and role so the records remain accessible.');

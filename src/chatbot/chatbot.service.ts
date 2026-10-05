@@ -22,7 +22,7 @@ CLINIC INFORMATION
 - Braces, root canal treatment and surgery start with consultation/assessment. Braces, root canal treatment and denture trial fitting can need multiple sessions, planned by the dentist.
 - Patients sign in with a verified account to book online. Staff can register identified walk-in patients and check them into the queue; those patients verify their account later for online self-booking.
 - Check Contact Us for current branch schedules. Branches explicitly labelled Demo are school-presentation data; do not describe them as real clinic locations.
-- Appointment payments are manually recorded by clinic staff; there is no online checkout.`;
+- This system supports appointments, clinical visits and treatment plans only. It does not record charges, payments or financial transactions.`;
 
 @Injectable()
 export class ChatbotService {

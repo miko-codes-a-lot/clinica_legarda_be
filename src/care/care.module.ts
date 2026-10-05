@@ -1,7 +1,6 @@
 import { PatientCareController } from './patient-care.controller';
 import { PatientCareService } from './patient-care.service';
 import { ClinicClosure, ClinicClosureSchema } from '../clinic-closures/entities/clinic-closure.entity';
-import { LedgerEntry, LedgerEntrySchema } from '../ledger/entities/ledger-entry.entity';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { User, UserSchema } from '../users/entities/user.entity';
@@ -26,7 +25,6 @@ import { TreatmentCasesController } from './treatment-cases.controller';
       { name: ClinicClosure.name, schema: ClinicClosureSchema },
     { name: DentalCatalog.name, schema: DentalCatalogSchema },
     { name: Visit.name, schema: VisitSchema },
-      { name: LedgerEntry.name, schema: LedgerEntrySchema },
     { name: TreatmentCase.name, schema: TreatmentCaseSchema },
   ])],
   controllers: [PatientCareController, PatientRecordsController, VisitsController, TreatmentCasesController],

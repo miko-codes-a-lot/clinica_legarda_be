@@ -18,7 +18,6 @@ import { ReferralsModule } from './referral/referrals.module';
 import { ReasonModule } from './reason/reason.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { join } from 'path';
-import { LedgerModule } from './ledger/ledger.module';
 import { CareModule } from './care/care.module';
 
 @Module({
@@ -48,7 +47,6 @@ import { CareModule } from './care/care.module';
     ReasonModule,
     ChatbotModule,
     CareModule,
-    LedgerModule,
     ClinicClosuresModule,
   ],
   controllers: [AppController],
