@@ -19,6 +19,7 @@ import { ReasonModule } from './reason/reason.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { join } from 'path';
 import { CareModule } from './care/care.module';
+import { AppointmentRemindersModule } from './appointment-reminders/appointment-reminders.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { CareModule } from './care/care.module';
     ClinicsModule,
     DentalCatalogModule,
     AppointmentsModule,
+    AppointmentRemindersModule,
     NotificationsModule,
     AnalyticsModule,
     ReferralsModule,

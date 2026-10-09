@@ -61,7 +61,7 @@ isolated('Walk-in registration and verified booking contract', () => {
     ] }).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
-    app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+    app.useGlobalPipes(new ValidationPipe());
     await app.init();
   });
   beforeEach(async () => {
@@ -106,6 +106,39 @@ isolated('Walk-in registration and verified booking contract', () => {
   it('rejects public walk-in registration and walk-in privileges for staff roles', async () => {
     await request(app.getHttpServer()).post('/users/register').send(profile()).expect(403);
     await staffPost('/users', { ...profile(), role: 'admin' }).expect(400);
+  });
+  it('accepts the public signup payload and stores an unverified patient with a hashed password', async () => {
+    const response = await request(app.getHttpServer()).post('/users/register').send({
+      ...profile('public.patient'), isWalkIn: false, role: 'user', status: 'pending', operatingHours: [],
+      emailAddress: 'public.patient@example.test', mobileNumber: '+639171110002',
+    }).expect(201);
+    expect(response.body).toMatchObject({ role: 'user', status: 'pending', clinics: [], isWalkIn: false });
+    expect(response.body).not.toHaveProperty('password');
+    const stored = await users.findById(response.body._id).select('+password');
+    expect(await bcrypt.compare(password, stored?.password ?? '')).toBe(true);
+    expect(stored?.otpVerifiedAt).toBeUndefined();
+  });
+  it.each(['dentist', 'admin', 'super-admin'])('cannot self-register %s privileges through public signup', async role => {
+    const response = await request(app.getHttpServer()).post('/users/register').send({
+      ...profile('public.patient'), isWalkIn: false, role, status: 'confirmed',
+      emailAddress: 'public.patient@example.test', mobileNumber: '+639171110002',
+      clinic: fixture.clinic, clinics: [fixture.clinic], otpVerifiedAt: new Date(),
+    }).expect(201);
+    expect(response.body).toMatchObject({ role: 'user', status: 'pending', clinics: [] });
+    const stored = await users.findById(response.body._id);
+    expect(stored?.role).toBe('user');
+    expect(stored?.status).toBe('pending');
+    expect(stored?.clinics).toEqual([]);
+    expect(stored?.clinic).toBeUndefined();
+    expect(stored?.otpVerifiedAt).toBeUndefined();
+  });
+  it('rejects the old empty-role signup payload before creating an account', async () => {
+    const response = await request(app.getHttpServer()).post('/users/register').send({
+      ...profile('public.patient'), isWalkIn: false, role: '',
+      emailAddress: 'public.patient@example.test', mobileNumber: '+639171110002',
+    }).expect(400);
+    expect(response.body.message).toContain('role must be one of the following values: user, dentist, admin, super-admin');
+    expect(await users.exists({ username: 'public.patient' })).toBeNull();
   });
   it.each(['pending', 'rejected'])('blocks staff booking a %s patient in the API as the selector does', async status => {
     await setPatient(status);

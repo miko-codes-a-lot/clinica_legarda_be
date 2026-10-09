@@ -2,6 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { google } from 'googleapis';
 import configuration from 'src/_shared/configuration';
 import { CLINIC_NAME } from '../_shared/clinic-brand';
+import { isEmail } from 'class-validator';
+
+export interface AppointmentReminderEmail {
+  clinicName: string;
+  clinicAddress: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}
 
 @Injectable()
 export class MailerService {
@@ -9,8 +18,42 @@ export class MailerService {
 
   constructor() {
     const { clientId, clientSecret, refreshToken } = configuration().gmail;
-    this.oAuth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    this.oAuth2Client = new google.auth.OAuth2({
+      clientId, clientSecret,
+      // OAuth refresh uses its own request before Gmail send. Bound both and
+      // leave retry scheduling to the reminder worker, within its claim lease.
+      transporterOptions: { timeout: 30_000, retryConfig: { retry: 0 } },
+    });
     this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
+  }
+
+  async sendAppointmentReminder(to: string, appointment: AppointmentReminderEmail): Promise<void> {
+    if (!isEmail(to) || /[\r\n]/.test(to)) throw new Error('Invalid reminder recipient');
+    const escape = (value: string) => value.replace(/[&<>"']/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[character] ?? character);
+    const date = new Intl.DateTimeFormat('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${appointment.date}T00:00:00Z`));
+    const time = (value: string) => {
+      const [hours, minutes] = value.split(':').map(Number);
+      return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours < 12 ? 'AM' : 'PM'}`;
+    };
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172a2a;line-height:1.6">
+      <h1>Your upcoming dental appointment</h1>
+      <p>This is a reminder of your confirmed appointment at ${escape(appointment.clinicName)}.</p>
+      <table cellpadding="8" style="border-collapse:collapse;text-align:left">
+        <tr><th>Date</th><td>${date}</td></tr>
+        <tr><th>Time</th><td>${time(appointment.startTime)} – ${time(appointment.endTime)} (Philippine time)</td></tr>
+        <tr><th>Clinic</th><td>${escape(appointment.clinicName)}</td></tr>
+        ${appointment.clinicAddress ? `<tr><th>Address</th><td>${escape(appointment.clinicAddress)}</td></tr>` : ''}
+      </table>
+      <p>Please sign in to your patient account to review, reschedule, or cancel your appointment.</p>
+      <p>${escape(CLINIC_NAME)}</p>
+    </body></html>`;
+    const rawMessage = this.buildRawMessage(configuration().gmail.from!, to, `Appointment reminder - ${CLINIC_NAME}`, html);
+    const gmail = google.gmail({ version: 'v1', auth: this.oAuth2Client });
+    await gmail.users.messages.send({ userId: 'me', requestBody: { raw: rawMessage } }, { timeout: 30_000, retry: false });
   }
 
   async sendOtp(to: string, code: string): Promise<void> {
