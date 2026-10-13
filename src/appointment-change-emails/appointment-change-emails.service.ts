@@ -7,7 +7,7 @@ import { Clinic } from '../clinics/entities/clinic.entity';
 import { MailerService } from '../mailer/mailer.service';
 import { AppointmentChangeEmail } from './entities/appointment-change-email.entity';
 import { randomUUID } from 'crypto';
-import { isEmail } from 'class-validator';
+import { isEmailRecipient } from '../mailer/email-recipient';
 
 @Injectable()
 export class AppointmentChangeEmailsService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -55,7 +55,7 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
           this.users.findById(claimed.patient).select('emailAddress').exec(),
           this.clinics.findById(claimed.clinic).select('name address').exec(),
         ]);
-        if (!clinic || !patient?.emailAddress || !isEmail(patient.emailAddress) || /[\r\n]/.test(patient.emailAddress)) {
+        if (!clinic || !patient || !isEmailRecipient(patient.emailAddress)) {
           await this.outbox.updateOne(claim, { $set: { skippedAt: new Date() }, $unset: { leaseToken: 1, lockedUntil: 1 } }).exec();
           continue;
         }

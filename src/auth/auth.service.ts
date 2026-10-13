@@ -78,6 +78,7 @@ export class AuthService {
       );
     }
 
+    this.mailerService.ensureSendingAvailable(user.emailAddress);
     const otpCode = await this.otpService.generate(user._id.toString(), user.emailAddress);
     await this.mailerService.sendOtp(user.emailAddress, otpCode);
 
@@ -103,6 +104,7 @@ export class AuthService {
       );
     }
 
+    this.mailerService.ensureSendingAvailable(user.emailAddress);
     const otpCode = await this.otpService.generate(userId, user.emailAddress);
     await this.mailerService.sendOtp(user.emailAddress, otpCode);
   }

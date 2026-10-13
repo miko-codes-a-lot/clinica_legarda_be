@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { createHash, randomUUID } from 'crypto';
-import { isEmail } from 'class-validator';
+import { isEmailRecipient } from '../mailer/email-recipient';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { MailerService } from '../mailer/mailer.service';
 import { AppointmentReminder } from './entities/appointment-reminder.entity';
@@ -30,7 +30,7 @@ function due(appointment: PopulatedAppointment, now: number): boolean {
   const start = startsAt(appointment);
   return appointment.status === AppointmentStatus.CONFIRMED && !appointment.disruption &&
     start > now && start <= now + DAY && !!appointment.clinic &&
-    typeof appointment.patient?.emailAddress === 'string' && isEmail(appointment.patient.emailAddress);
+    isEmailRecipient(appointment.patient?.emailAddress);
 }
 
 @Injectable()

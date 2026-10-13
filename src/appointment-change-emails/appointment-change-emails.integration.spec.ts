@@ -45,7 +45,7 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     send.mockReset().mockResolvedValue(undefined);
     const hours = ['monday', 'tuesday'].map(day => ({ day, startTime: '09:00', endTime: '16:00' }));
     const clinic = await clinics.create({ name: 'Email test clinic', address: 'Test address', operatingHours: hours });
-    const patient = await users.create({ role: 'user', status: 'confirmed', emailAddress: 'patient@example.test' });
+    const patient = await users.create({ role: 'user', status: 'confirmed', emailAddress: 'patient@clinic-mail.ph' });
     const dentist = await users.create({ role: 'dentist', status: 'confirmed', clinics: [clinic._id], operatingHours: hours });
     const treatment = await catalog.create({ name: 'Test treatment', duration: 30, clinics: [clinic._id] });
     fixture = { patient: patient.id, dentist: dentist.id, clinic: clinic.id, service: treatment.id };
@@ -66,7 +66,7 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     await Promise.all([worker().sendPending(), worker().sendPending()]);
     await worker().sendPending();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]).toMatchObject(['patient@example.test', { kind: 'rescheduled', clinicName: 'Email test clinic', date: '2026-10-20' }]);
+    expect(send.mock.calls[0]).toMatchObject(['patient@clinic-mail.ph', { kind: 'rescheduled', clinicName: 'Email test clinic', date: '2026-10-20' }]);
   });
 
   it('persists rejection mail only for a successful staff decision', async () => {
@@ -77,7 +77,7 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     await expect(service.reject(appointment.id, actor(), 'Duplicate click')).rejects.toThrow();
     expect(await outbox.countDocuments()).toBe(1);
     await worker().sendPending();
-    expect(send).toHaveBeenCalledWith('patient@example.test', expect.objectContaining({ kind: 'rejected', reason: 'Dentist unavailable' }));
+    expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({ kind: 'rejected', reason: 'Dentist unavailable' }));
   });
 
   it('does not enqueue patient self-reschedules', async () => {
@@ -123,6 +123,16 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     jest.setSystemTime(new Date('2026-10-13T00:10:00Z')); await worker().sendPending();
     expect(send).toHaveBeenCalledTimes(2);
     expect(await outbox.countDocuments({ sentAt: { $exists: true } })).toBe(1);
+  });
+
+  it('records a skipped demo destination without contacting Gmail or marking it sent', async () => {
+    await users.updateOne({ _id: fixture.patient }, { emailAddress: 'patient@example.test' });
+    const queued = await event();
+    await worker().sendPending();
+    const stored = await outbox.findById(queued._id);
+    expect(stored?.skippedAt).toBeInstanceOf(Date);
+    expect(stored?.sentAt).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('recovers an expired claim and skips missing or invalid email without exposing contacts', async () => {

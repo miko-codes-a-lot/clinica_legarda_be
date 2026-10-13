@@ -39,7 +39,7 @@ const uri = process.env.TEST_REMINDER_MONGO_URI;
     jest.setSystemTime(new Date('2026-10-09T01:30:00Z')); // October 9, 9:30 AM Manila
     send.mockReset().mockResolvedValue(undefined);
     const clinic = await clinics.create({ name: 'Test Clinic', address: 'Test Address' });
-    const patient = await users.create({ role: 'user', emailAddress: 'patient@example.test' });
+    const patient = await users.create({ role: 'user', emailAddress: 'patient@clinic-mail.ph' });
     const dentist = await users.create({ role: 'dentist' });
     fixture = { clinic: clinic.id, patient: patient.id, dentist: dentist.id };
     service = createService();
@@ -52,7 +52,7 @@ const uri = process.env.TEST_REMINDER_MONGO_URI;
     await Promise.all([service.sendDueReminders(), createService().sendDueReminders()]);
     await createService().sendDueReminders();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith('patient@example.test', {
+    expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', {
       clinicName: 'Test Clinic', clinicAddress: 'Test Address', date: '2026-10-10', startTime: '09:30', endTime: '10:00',
     });
     expect(await reminders.countDocuments({ sentAt: { $exists: true } })).toBe(1);
@@ -74,6 +74,14 @@ const uri = process.env.TEST_REMINDER_MONGO_URI;
     await service.sendDueReminders();
     expect(send).not.toHaveBeenCalled();
     await users.updateOne({ _id: fixture.patient }, { $unset: { emailAddress: 1 } });
+    await book();
+    await service.sendDueReminders();
+    expect(send).not.toHaveBeenCalled();
+    expect(await reminders.countDocuments()).toBe(0);
+  });
+
+  it('does not create a delivery claim or contact Gmail for demo email addresses', async () => {
+    await users.updateOne({ _id: fixture.patient }, { emailAddress: 'patient@example.test' });
     await book();
     await service.sendDueReminders();
     expect(send).not.toHaveBeenCalled();

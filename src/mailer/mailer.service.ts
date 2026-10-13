@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { google } from 'googleapis';
 import configuration from 'src/_shared/configuration';
 import { CLINIC_NAME } from '../_shared/clinic-brand';
-import { isEmail } from 'class-validator';
+import { isEmailRecipient } from './email-recipient';
 
 export interface AppointmentReminderEmail {
   clinicName: string;
@@ -22,9 +22,15 @@ export interface AppointmentChangeMessage extends AppointmentReminderEmail {
 @Injectable()
 export class MailerService {
   private oAuth2Client: InstanceType<typeof google.auth.OAuth2>;
+  private readonly sendingPausedUntil?: number;
 
   constructor() {
-    const { clientId, clientSecret, refreshToken } = configuration().gmail;
+    const { clientId, clientSecret, refreshToken, sendingPausedUntil } = configuration().gmail;
+    if (sendingPausedUntil) {
+      const deadline = Date.parse(sendingPausedUntil);
+      if (!Number.isFinite(deadline)) throw new Error('GMAIL_SENDING_PAUSED_UNTIL must be a valid date.');
+      this.sendingPausedUntil = deadline;
+    }
     this.oAuth2Client = new google.auth.OAuth2({
       clientId, clientSecret,
       // OAuth refresh uses its own request before Gmail send. Bound both and
@@ -34,8 +40,17 @@ export class MailerService {
     this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
   }
 
+  ensureSendingAvailable(to: string): void {
+    if (!isEmailRecipient(to)) {
+      throw new BadRequestException('This email address cannot receive messages. Ask the clinic to add a real email address.');
+    }
+    if (this.sendingPausedUntil !== undefined && Date.now() < this.sendingPausedUntil) {
+      throw new ServiceUnavailableException('Email delivery is temporarily unavailable. Please try again later or contact the clinic.');
+    }
+  }
+
   async sendAppointmentChange(to: string, change: AppointmentChangeMessage): Promise<void> {
-    if (!isEmail(to) || /[\r\n]/.test(to)) throw new Error('Invalid appointment notice recipient');
+    this.ensureSendingAvailable(to);
     const escape = (value: string) => value.replace(/[&<>"']/g, character => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[character] ?? character);
@@ -68,7 +83,7 @@ export class MailerService {
   }
 
   async sendAppointmentReminder(to: string, appointment: AppointmentReminderEmail): Promise<void> {
-    if (!isEmail(to) || /[\r\n]/.test(to)) throw new Error('Invalid reminder recipient');
+    this.ensureSendingAvailable(to);
     const escape = (value: string) => value.replace(/[&<>"']/g, character => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[character] ?? character);
@@ -97,6 +112,7 @@ export class MailerService {
   }
 
   async sendOtp(to: string, code: string): Promise<void> {
+    this.ensureSendingAvailable(to);
     const { from } = configuration().gmail;
 
     const subject = `Login OTP - ${CLINIC_NAME}`;
@@ -155,7 +171,7 @@ export class MailerService {
     await gmail.users.messages.send({
       userId: 'me',
       requestBody: { raw: rawMessage },
-    });
+    }, { timeout: 30_000, retry: false });
   }
 
   private buildRawMessage(

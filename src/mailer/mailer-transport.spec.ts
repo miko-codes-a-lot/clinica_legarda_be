@@ -25,7 +25,7 @@ it('bounds token refresh and Gmail transport below the five-minute reminder leas
     config, status: 200, statusText: 'OK', headers: new Headers(),
     data: String(config.url).includes('/token') ? { access_token: 'local-token', expires_in: 3600 } : { id: 'captured' },
   }));
-  await new MailerService().sendAppointmentReminder('patient@example.test', {
+  await new MailerService().sendAppointmentReminder('patient@clinic-mail.ph', {
     clinicName: 'Local clinic', clinicAddress: '', date: '2026-10-10', startTime: '09:00', endTime: '09:30',
   });
   expect(mockTransport).toHaveBeenCalledTimes(2);

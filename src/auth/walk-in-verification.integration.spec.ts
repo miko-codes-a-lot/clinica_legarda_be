@@ -52,8 +52,9 @@ isolated('Walk-in registration and verified booking contract', () => {
       signAsync: async (payload: Record<string, unknown>) => { const token = `fixture-${claims.size}`; claims.set(token, payload); return token; },
     } as unknown as JwtService;
     const auth = new AuthService(jwt, userService, new OtpService(otps), {
+      ensureSendingAvailable: () => {},
       sendOtp: async (email: string, value: string) => { recipient = email; code = value; },
-    } as MailerService);
+    } as unknown as MailerService);
     const service = new AppointmentsService(appointments, new AppointmentSchedulingService(appointments, users, clinics, catalog), referrals, users);
     const module = await Test.createTestingModule({ controllers: [UsersController, AuthController, AppointmentsController], providers: [
       { provide: UsersService, useValue: userService }, { provide: AuthService, useValue: auth },

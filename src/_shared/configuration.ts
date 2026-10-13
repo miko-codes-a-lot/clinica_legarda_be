@@ -12,6 +12,7 @@ export default () => ({
     clientSecret: process.env.GMAIL_CLIENT_SECRET,
     refreshToken: process.env.GMAIL_REFRESH_TOKEN,
     from: process.env.GMAIL_FROM_EMAIL,
+    sendingPausedUntil: process.env.GMAIL_SENDING_PAUSED_UNTIL,
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY,
