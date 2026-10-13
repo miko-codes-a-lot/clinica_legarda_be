@@ -8,6 +8,7 @@ import { ClinicsService } from './clinics.service';
 import { Clinic } from './entities/clinic.entity';
 import { User } from '../users/entities/user.entity';
 import { ClinicUpsertDto } from './dto/clinic-upsert.dto';
+import { validateSync } from 'class-validator';
 
 const doc: ClinicUpsertDto = {
   name: 'Annex Clinic',
@@ -17,6 +18,10 @@ const doc: ClinicUpsertDto = {
 };
 
 describe('Clinic management', () => {
+  it('rejects explicit null appointment-only days at the API validation boundary', () => {
+    const value = Object.assign(new ClinicUpsertDto(), { ...doc, appointmentOnlyDays: null });
+    expect(validateSync(value).some(error => error.property === 'appointmentOnlyDays')).toBe(true);
+  });
   let clinics: {
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -54,6 +59,17 @@ describe('Clinic management', () => {
     await expect(save('super-admin')).resolves.toMatchObject({
       name: 'Annex Clinic',
     });
+  });
+  it('persists appointment-only days without replacing existing weekly hours implicitly', async () => {
+    await service.upsert({ ...doc, appointmentOnlyDays: ['sunday'] }, undefined, { sub: '000000000000000000000001', role: 'super-admin' });
+    expect(clinics.findOneAndUpdate.mock.calls[0][1].$set).toMatchObject({ appointmentOnlyDays: ['sunday'] });
+    expect(clinics.findOneAndUpdate.mock.calls[0][1].$set.operatingHours).toBeUndefined();
+  });
+
+  it('rejects ambiguous fixed hours and appointment-only availability on the same day', async () => {
+    await expect(service.upsert({ ...doc, appointmentOnlyDays: ['sunday'], operatingHours: [{ day: 'sunday', startTime: '09:00', endTime: '17:00' }] }, undefined,
+      { sub: '000000000000000000000001', role: 'super-admin' })).rejects.toThrow('both fixed hours and by appointment');
+    expect(clinics.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('rejects an admin update before reading or changing the clinic', async () => {

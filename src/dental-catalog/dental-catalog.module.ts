@@ -1,3 +1,4 @@
+import { Clinic, ClinicSchema } from '../clinics/entities/clinic.entity';
 import { Module } from '@nestjs/common';
 import { DentalCatalogService } from './dental-catalog.service';
 import { DentalCatalogController } from './dental-catalog.controller';
@@ -11,6 +12,7 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: DentalCatalog.name, schema: DentalCatalogSchema },
+      { name: Clinic.name, schema: ClinicSchema },
     ]),
   ],
   controllers: [DentalCatalogController],

@@ -25,6 +25,17 @@ describe('Clinic-aware scheduling rules', () => {
     expect(() => validateSchedule(request, dentist, [{ ...hours[0], startTime: '09:30' }], 60, [])).toThrow('clinic operating hours');
     expect(() => validateSchedule(request, dentist, [], 60, [])).toThrow('clinic operating hours');
   });
+  it('uses fixed clinic hours safely when legacy appointment-only metadata is null', () => {
+    expect(() => validateSchedule(request, dentist, hours, 60, [], null)).not.toThrow();
+  });
+  it('allows appointment-only Sunday within the dentist schedule while still enforcing provider availability', () => {
+    const sundayRequest = { ...request, date: new Date('2026-10-18') };
+    const sundayDentist = { ...dentist, operatingHours: [{ ...hours[0], day: 'sunday' }] };
+    expect(() => validateSchedule(sundayRequest, sundayDentist, [], 60, [], ['sunday'])).not.toThrow();
+    expect(() => validateSchedule(sundayRequest, sundayDentist, [], 60, [])).toThrow('clinic operating hours');
+    expect(() => validateSchedule(sundayRequest, dentist, [], 60, [], ['sunday'])).toThrow('dentist operating hours');
+    expect(() => validateSchedule({ ...sundayRequest, startTime: '07:00', endTime: '08:00' }, sundayDentist, [], 60, [], ['sunday'])).toThrow('dentist operating hours');
+  });
   it('rejects short or reversed intervals rather than bypassing service duration', () => {
     expect(() => validate({ endTime: '09:30' })).toThrow('cover the selected services');
     expect(() => validate({ endTime: '08:30' })).toThrow(BadRequestException);

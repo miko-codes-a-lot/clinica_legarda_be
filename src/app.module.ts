@@ -20,6 +20,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
 import { join } from 'path';
 import { CareModule } from './care/care.module';
 import { AppointmentRemindersModule } from './appointment-reminders/appointment-reminders.module';
+import { AppointmentChangeEmailsModule } from './appointment-change-emails/appointment-change-emails.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { AppointmentRemindersModule } from './appointment-reminders/appointment-
     DentalCatalogModule,
     AppointmentsModule,
     AppointmentRemindersModule,
+    AppointmentChangeEmailsModule,
     NotificationsModule,
     AnalyticsModule,
     ReferralsModule,

@@ -8,7 +8,8 @@ import {
   HttpStatus,
   Put,
   Patch,
-  Query
+  Query,
+  ForbiddenException,
 } from '@nestjs/common';
 
 import { ReasonService } from './reason.service';
@@ -17,12 +18,17 @@ import { ReasonUsage } from './entities/reason.entity';
 import { ReasonUpsertDto } from './dto/reason-upsert.dto';
 
 
+import { User } from '../_shared/decorators/user.decorator';
+import { UserDto } from '../auth/dto/user.dto';
+import { isAdmin } from '../auth/role-policy';
+
 @Controller('reasons')
 export class ReasonController {
   constructor(private readonly reasonService: ReasonService) {}
 
   @Post()
-  create(@Body() dto: ReasonUpsertDto) {
+  create(@Body() dto: ReasonUpsertDto, @User() actor: UserDto) {
+    this.assertManagement(actor);
     return this.reasonService.create(dto);
   }
 
@@ -37,12 +43,18 @@ export class ReasonController {
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: ReasonUpsertDto) {
+  update(@Param('id') id: string, @Body() dto: ReasonUpsertDto, @User() actor: UserDto) {
+    this.assertManagement(actor);
     return this.reasonService.update(id, dto);
   }
 
   @Patch(':id/toggle')
-  toggle(@Param('id') id: string) {
+  toggle(@Param('id') id: string, @User() actor: UserDto) {
+    this.assertManagement(actor);
     return this.reasonService.toggleActive(id);
+  }
+
+  private assertManagement(actor: UserDto): void {
+    if (!isAdmin(actor)) throw new ForbiddenException('Only administrators may manage reasons.');
   }
 }

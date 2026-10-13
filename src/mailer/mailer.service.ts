@@ -12,6 +12,13 @@ export interface AppointmentReminderEmail {
   endTime: string;
 }
 
+export interface AppointmentChangeMessage extends AppointmentReminderEmail {
+  kind: 'rescheduled' | 'rejected';
+  previousSchedule?: Pick<AppointmentReminderEmail, 'date' | 'startTime' | 'endTime'>;
+  reason?: string;
+  changedAt: Date;
+}
+
 @Injectable()
 export class MailerService {
   private oAuth2Client: InstanceType<typeof google.auth.OAuth2>;
@@ -25,6 +32,39 @@ export class MailerService {
       transporterOptions: { timeout: 30_000, retryConfig: { retry: 0 } },
     });
     this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
+  }
+
+  async sendAppointmentChange(to: string, change: AppointmentChangeMessage): Promise<void> {
+    if (!isEmail(to) || /[\r\n]/.test(to)) throw new Error('Invalid appointment notice recipient');
+    const escape = (value: string) => value.replace(/[&<>"']/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[character] ?? character);
+    const date = (value: string) => new Intl.DateTimeFormat('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${value}T00:00:00Z`));
+    const time = (value: string) => {
+      const [hours, minutes] = value.split(':').map(Number);
+      return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours < 12 ? 'AM' : 'PM'}`;
+    };
+    const schedule = (value: Pick<AppointmentReminderEmail, 'date' | 'startTime' | 'endTime'>) =>
+      `${date(value.date)} · ${time(value.startTime)} – ${time(value.endTime)} (Philippine time)`;
+    const rescheduled = change.kind === 'rescheduled';
+    const heading = rescheduled ? 'Your appointment was rescheduled' : 'Your appointment request was declined';
+    const changed = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' }).format(change.changedAt);
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172a2a;line-height:1.6">
+      <h1>${heading}</h1><p>This update was made on ${changed} (Philippine time).</p>
+      <p>${rescheduled ? 'Clinic staff rescheduled your appointment. The revised appointment is pending confirmation.' : 'Your appointment request has been declined. Please contact the clinic to discuss another schedule.'}</p>
+      <table cellpadding="8" style="border-collapse:collapse;text-align:left">
+        <tr><th>Clinic</th><td>${escape(change.clinicName)}</td></tr>
+        ${change.clinicAddress ? `<tr><th>Address</th><td>${escape(change.clinicAddress)}</td></tr>` : ''}
+        ${rescheduled && change.previousSchedule ? `<tr><th>Previous schedule</th><td>${schedule(change.previousSchedule)}</td></tr>` : ''}
+        <tr><th>${rescheduled ? 'Revised schedule' : 'Requested schedule'}</th><td>${schedule(change)}</td></tr>
+        ${change.reason ? `<tr><th>Reason</th><td>${escape(change.reason)}</td></tr>` : ''}
+      </table><p>Sign in to your patient account for the latest appointment status, or contact the clinic for help.</p>
+      <p>${escape(CLINIC_NAME)}</p></body></html>`;
+    const raw = this.buildRawMessage(configuration().gmail.from!, to, `${rescheduled ? 'Appointment rescheduled' : 'Appointment declined'} - ${CLINIC_NAME}`, html);
+    const gmail = google.gmail({ version: 'v1', auth: this.oAuth2Client });
+    await gmail.users.messages.send({ userId: 'me', requestBody: { raw } }, { timeout: 30_000, retry: false });
   }
 
   async sendAppointmentReminder(to: string, appointment: AppointmentReminderEmail): Promise<void> {

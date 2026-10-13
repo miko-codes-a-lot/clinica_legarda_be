@@ -14,10 +14,12 @@ import {
 } from '../dental-catalog/entities/dental-catalog.entity';
 import { Visit, VisitSchema } from '../care/entities/visit.entity';
 import { TreatmentCase, TreatmentCaseSchema } from '../care/entities/treatment-case.entity';
+import { AppointmentChangeEmail, AppointmentChangeEmailSchema } from '../appointment-change-emails/entities/appointment-change-email.entity';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
+      { name: AppointmentChangeEmail.name, schema: AppointmentChangeEmailSchema },
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Referral.name, schema: ReferralSchema },
       { name: User.name, schema: UserSchema }, // ✅ ADD

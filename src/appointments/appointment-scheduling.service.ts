@@ -73,6 +73,10 @@ export class AppointmentSchedulingService {
       ...appointments.flatMap(appointment => appointment.services.map(service => clinicReferenceId(service)).filter((id): id is string => !!id)),
     ])];
     const services = await this.services.find({ _id: { $in: serviceIds } }).session(session).exec();
+    const selectedServices = services.filter(service => request.services.includes(service.id));
+    if (selectedServices.some(service => service.clinics !== undefined && !service.clinics.some(clinic => clinicReferenceId(clinic) === request.clinic))) {
+      throw new BadRequestException('Service is not available at the selected clinic');
+    }
     const durations = new Map(services.map(service => [service.id as string, service.duration]));
     if (request.services.some(id => !durations.has(id))) throw new BadRequestException('Invalid service selected');
     const duration = (ids: string[]) => [...new Set(ids)].reduce((sum, id) => {
@@ -86,7 +90,7 @@ export class AppointmentSchedulingService {
       startTime: appointment.startTime,
       endTime: appointment.endTime,
       serviceMinutes: duration(appointment.services.map(service => clinicReferenceId(service)).filter((id): id is string => !!id)),
-    })));
+    })), clinic.appointmentOnlyDays);
     return request;
   }
 }

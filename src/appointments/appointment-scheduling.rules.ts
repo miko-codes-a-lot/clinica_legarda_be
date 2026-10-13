@@ -55,6 +55,7 @@ export function validateSchedule(
   clinicHours: OperatingHour[] | undefined,
   serviceMinutes: number,
   occupied: readonly OccupiedAppointment[],
+  appointmentOnlyDays: readonly string[] | null = [],
 ): void {
   if (dentist.role !== 'dentist' || dentist.status !== 'confirmed') {
     throw new BadRequestException('Select a confirmed dentist');
@@ -70,7 +71,7 @@ export function validateSchedule(
   }
   const day = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][date.getUTCDay()];
   withinHours(dentist.operatingHours, day, start, end, 'dentist');
-  withinHours(clinicHours, day, start, end, 'clinic');
+  if (!(appointmentOnlyDays ?? []).includes(day)) withinHours(clinicHours, day, start, end, 'clinic');
   const buffer = dentist.appointmentBufferMinutes;
   const capacity = dentist.maxWorkingMinutesPerDay;
   if (!Number.isFinite(buffer) || buffer < 0 || !Number.isFinite(capacity) || capacity <= 0) {

@@ -52,11 +52,18 @@ export class ClinicsService {
         'Only super administrators may manage clinics.',
       );
     }
+    let existing: Clinic | null = null;
     if (id) {
       this.validateId(id);
-      if (!(await this.clinicModel.findById(id))) {
+      existing = await this.clinicModel.findById(id);
+      if (!existing) {
         throw new NotFoundException('Clinic not found.');
       }
+    }
+    const hours = doc.operatingHours ?? existing?.operatingHours ?? [];
+    const appointmentOnlyDays = doc.appointmentOnlyDays ?? existing?.appointmentOnlyDays ?? [];
+    if (hours.some(hour => appointmentOnlyDays.includes(hour.day))) {
+      throw new BadRequestException('A clinic day cannot have both fixed hours and by appointment availability.');
     }
     const name = doc.name.trim();
     const nameKey = name.toLowerCase();
@@ -91,6 +98,7 @@ export class ClinicsService {
             ...(doc.operatingHours !== undefined && {
               operatingHours: doc.operatingHours,
             }),
+            ...(doc.appointmentOnlyDays !== undefined && { appointmentOnlyDays: doc.appointmentOnlyDays }),
           },
         },
         { upsert: !id, new: true, runValidators: true },

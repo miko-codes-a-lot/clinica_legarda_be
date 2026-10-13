@@ -40,6 +40,7 @@ import { patientBookingStatuses } from '../users/patient-booking-policy';
 import { Visit } from '../care/entities/visit.entity';
 import { TreatmentCase } from '../care/entities/treatment-case.entity';
 import { assertCareCaseLink } from '../care/clinical-rules';
+import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
 
 @Injectable()
 export class AppointmentsService {
@@ -51,6 +52,7 @@ export class AppointmentsService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(TreatmentCase.name) private readonly careCases?: Model<TreatmentCase>,
     @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
+    @InjectModel(AppointmentChangeEmail.name) private readonly changeEmailOutbox?: Model<AppointmentChangeEmail>,
   ) {}
 
   async create(dto: AppointmentUpsertDto, actor: UserActor) {
@@ -190,7 +192,7 @@ export class AppointmentsService {
   >(query: T): T {
     return query.populate([
       { path: 'clinic' },
-      { path: 'services' },
+      { path: 'services', select: '_id name duration' },
       { path: 'patient', select: APPOINTMENT_PERSON_FIELDS },
       { path: 'dentist', select: DENTIST_DIRECTORY_FIELDS },
       {
@@ -247,6 +249,10 @@ export class AppointmentsService {
           },
           session,
         );
+        const scheduleChanged = current.date.getTime() !== validated.date.getTime() || current.startTime !== validated.startTime ||
+          current.endTime !== validated.endTime || !sameId(current.clinic, validated.clinic) || !sameId(current.dentist, validated.dentist);
+        if (scheduleChanged) await this.queueChangeEmail(current, 'rescheduled', this.emailSchedule(validated), actor, session, undefined,
+          { patient: validated.patient, clinic: validated.clinic });
       },
     );
     return this.findOne(id, actor);
@@ -342,6 +348,7 @@ export class AppointmentsService {
         },
         session,
       );
+      await this.queueChangeEmail(current, 'rescheduled', this.emailSchedule(validated), actor, session, dto.reason);
     });
     return this.findOne(id, actor);
   }
@@ -430,12 +437,13 @@ export class AppointmentsService {
           {
             $set: { status: AppointmentStatus.REJECTED },
             $push: {
-              history: this.historyEntry('Appointment rejected.', actor),
+              history: this.historyEntry('Appointment rejected.', actor, reasonOfDecline),
             },
           },
           session,
         );
         await rejectReferral(session);
+        await this.queueChangeEmail(current, 'rejected', this.emailSchedule(current), actor, session, reasonOfDecline);
       },
       referral,
     );
@@ -490,6 +498,9 @@ export class AppointmentsService {
         },
         session,
       );
+      if (status === AppointmentStatus.REJECTED) {
+        await this.queueChangeEmail(current, 'rejected', this.emailSchedule(current), actor, session, reason);
+      }
     });
     return this.findOne(id, actor);
   }
@@ -500,6 +511,21 @@ export class AppointmentsService {
         `This action is not allowed for a ${current.status} appointment.`,
       );
     }
+  }
+
+  private emailSchedule(appointment: Pick<Appointment, 'date' | 'startTime' | 'endTime'>) {
+    return { date: appointment.date.toISOString().slice(0, 10), startTime: appointment.startTime, endTime: appointment.endTime };
+  }
+
+  private async queueChangeEmail(current: AppointmentDocument, kind: 'rescheduled' | 'rejected',
+    schedule: { date: string; startTime: string; endTime: string }, actor: UserActor, session: ClientSession, reason?: string,
+    target?: { patient: string; clinic: string }) {
+    if (actor.role === 'user' || !this.changeEmailOutbox) return;
+    await this.changeEmailOutbox.create([{
+      appointment: current._id, patient: new Types.ObjectId(target?.patient ?? referenceId(current.patient)),
+      clinic: new Types.ObjectId(target?.clinic ?? referenceId(current.clinic)), kind, schedule,
+      ...(kind === 'rescheduled' && (!target || sameId(current.patient, target.patient)) ? { previousSchedule: this.emailSchedule(current) } : {}), reason: reason?.trim(),
+    }], { session });
   }
 
   private historyEntry(action: string, actor: UserActor, reason?: string) {

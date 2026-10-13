@@ -1,5 +1,8 @@
 import {
   IsNotEmpty,
+  IsArray,
+  IsMongoId,
+  ArrayUnique,
   IsNumber,
   IsString,
   Min,
@@ -16,4 +19,9 @@ export class DentalCatalogUpsertDto {
   @IsNotEmpty()
   @Min(0)
   duration: number;
+
+  @IsArray()
+  @ArrayUnique()
+  @IsMongoId({ each: true })
+  clinics: string[];
 }

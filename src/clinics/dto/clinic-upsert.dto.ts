@@ -1,12 +1,15 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayUnique,
+  IsIn,
   IsEmail,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { OperatingHourDto } from 'src/_shared/dto/operating-hour.dto';
 
@@ -34,4 +37,10 @@ export class ClinicUpsertDto {
   @ValidateNested({ each: true })
   @Type(() => OperatingHourDto)
   operatingHours?: OperatingHourDto[];
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'], { each: true })
+  appointmentOnlyDays?: string[];
 }
