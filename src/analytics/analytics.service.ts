@@ -105,7 +105,7 @@ export class AnalyticsService {
         patientRecordChanges: { events: changes.length, patients: new Set(changes.map(row => row.patient.toString())).size, counts, coverageFrom },
         metricDefinitions: { completedShare: 'Completed appointments / all appointments in the selected period.',
           noShowRate: 'No-show rate among resolved outcomes: No-show / (completed + No-show).',
-          patientRecordChanges: 'Actual profile and clinical record changes recorded since audit activation. Unchanged saves, sign-in activity and appointment updates are excluded. Historical changes have not been reconstructed.' } };
+          patientRecordChanges: 'Actual patient profile edits, visit record changes and dental chart revisions recorded since audit activation. Treatment case creation or closure, unchanged saves, sign-in activity and appointment updates are excluded. Historical changes have not been reconstructed.' } };
     });
   }
 
