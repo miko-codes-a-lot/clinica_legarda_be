@@ -22,6 +22,7 @@ import { CareModule } from './care/care.module';
 import { AppointmentRemindersModule } from './appointment-reminders/appointment-reminders.module';
 import { AppointmentChangeEmailsModule } from './appointment-change-emails/appointment-change-emails.module';
 import { DentistAvailabilityModule } from './dentist-availability/dentist-availability.module';
+import { AppointmentNoShowsModule } from './appointment-no-shows/appointment-no-shows.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { DentistAvailabilityModule } from './dentist-availability/dentist-availa
     AppointmentRemindersModule,
     AppointmentChangeEmailsModule,
     DentistAvailabilityModule,
+    AppointmentNoShowsModule,
     NotificationsModule,
     AnalyticsModule,
     ReferralsModule,

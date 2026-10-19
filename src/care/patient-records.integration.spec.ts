@@ -296,7 +296,7 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     expect(closed.body.visits).toHaveLength(1);
     await close(1).expect(409);
   });
-  const bookSession = (careCase: string, patient = fixture.patient) => request(app.getHttpServer()).post('/appointments').set('x-fixture-user', fixture.dentist).send({ careCase, clinic: fixture.clinic, dentist: fixture.dentist, patient, date: '2026-10-12', startTime: '14:00', endTime: '14:30', services: [fixture.service] });
+  const bookSession = (careCase: string, patient = fixture.patient) => request(app.getHttpServer()).post('/appointments').set('x-fixture-user', fixture.dentist).send({ careCase, clinic: fixture.clinic, dentist: fixture.dentist, patient, date: new Date(Date.parse(manilaDay()) + 86400000).toISOString().slice(0,10), startTime: '14:00', endTime: '14:30', services: [fixture.service] });
   it('links future appointments to an active matching case and refuses mismatched or closed cases', async () => {
     const visit = await startVisit();
     const result = await postCase(visit._id).expect(201);
