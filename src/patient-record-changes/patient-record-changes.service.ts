@@ -5,7 +5,7 @@ import { UserActor } from '../auth/role-policy';
 import { referenceId } from '../auth/reference-id';
 import { PatientRecordAuditState, PatientRecordChange } from './entities/patient-record-change.entity';
 
-export const PROFILE_AUDIT_FIELDS = ['firstName','middleName','lastName','username','emailAddress','mobileNumber','address','profilePicture'] as const;
+export const PROFILE_AUDIT_FIELDS = ['firstName','middleName','lastName','username','emailAddress','mobileNumber','address','profilePicture','birthDate','sex','occupation','religion','maritalStatus'] as const;
 export const CLINICAL_AUDIT_FIELDS = ['assessment','treatments','summary','aftercare','nextSteps','state'] as const;
 export function changedPatientFields(before: object, after: object, allowed: readonly string[]): string[] {
   const value = (row: object, key: string): unknown => (row as Record<string, unknown>)[key] ?? '';

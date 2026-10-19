@@ -48,6 +48,22 @@ const uri = process.env.CLINICA_PANELIST_TEST_URI;
   afterEach(() => jest.restoreAllMocks());
   afterAll(async () => { await db?.dropDatabase(); await db?.close(); });
 
+  it('saves and clears optional details, audits real edits and preserves access boundaries', async () => {
+    const details = { birthDate: '2000-02-29', sex: ' Female ', occupation: ' Student ', religion: '', maritalStatus: ' Single ' };
+    await profiles.upsert({ ...profile(), ...details }, f.patient, actor());
+    const saved = await users.findById(f.patient); expect(saved?.occupation).toBe('Student'); expect(saved?.birthDate).toBe('2000-02-29');
+    await profiles.upsert({ ...profile(), ...details }, f.patient, actor());
+    expect(await changes.countDocuments()).toBe(1);
+    const access = new CareAccessService(users, appointments, visits);
+    await expect(access.requirePatient({ sub: f.dentist, role: 'dentist', clinics: [f.clinic] }, f.patient, f.clinic)).rejects.toThrow();
+    await appointments.create({ patient: f.patient, dentist: f.dentist, clinic: f.clinic, date: new Date('2026-10-20'), startTime: '09:00', endTime: '09:30', services: [], status: 'pending', createdBy: f.patient });
+    const visible = await access.requirePatient({ sub: f.dentist, role: 'dentist', clinics: [f.clinic] }, f.patient, f.clinic);
+    expect(visible.birthDate).toBe('2000-02-29');
+    await expect(profiles.upsert({ ...profile(), birthDate: '2025-02-29' }, f.patient, actor())).rejects.toThrow();
+    await expect(profiles.upsert({ ...profile(), role: 'super-admin', birthDate: '2000-02-29' }, f.patient, { sub: f.patient, role: 'user' })).rejects.toThrow();
+    await profiles.upsert({ ...profile(), birthDate: '', occupation: '' }, f.patient, actor());
+    expect((await users.findById(f.patient))?.birthDate).toBeUndefined();
+  });
   it('records real profile changes once, excludes credentials/activity and scopes shared-patient edits to the acting clinic', async () => {
     await profiles.upsert({ ...profile(), address: 'New address' }, f.patient, actor());
     await profiles.upsert({ ...profile(), address: 'New address' }, f.patient, actor());

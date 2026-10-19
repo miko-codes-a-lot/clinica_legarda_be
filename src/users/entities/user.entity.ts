@@ -45,6 +45,21 @@ export class User {
   address: string;
 
   @Prop()
+  birthDate?: string;
+
+  @Prop()
+  sex?: string;
+
+  @Prop()
+  occupation?: string;
+
+  @Prop()
+  religion?: string;
+
+  @Prop()
+  maritalStatus?: string;
+
+  @Prop()
   username: string;
 
   @Prop({ select: false })

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  MaxLength,
   IsArray,
   IsEmail,
   IsMongoId,
@@ -31,6 +32,31 @@ export class UserUpsertDto {
 
   @IsNotEmpty()
   lastName: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  birthDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  sex?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  occupation?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  religion?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  maritalStatus?: string;
 
   @IsNotEmpty()
   username: string;

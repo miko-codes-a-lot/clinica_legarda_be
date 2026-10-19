@@ -25,6 +25,7 @@ import { adminClinicIds, adminClinicScope, visibleClinicMemberships } from '../a
 import { Visit } from '../care/entities/visit.entity';
 import { PatientRecordChangesService, changedPatientFields, PROFILE_AUDIT_FIELDS } from '../patient-record-changes/patient-record-changes.service';
 import { randomUUID } from 'crypto';
+import { DEMOGRAPHIC_FIELDS, patientDemographics } from './patient-demographics';
 
 @Injectable()
 export class UsersService {
@@ -466,7 +467,7 @@ export class UsersService {
     ] as const;
     for (const field of fields)
       if (doc[field] !== undefined) result[field] = doc[field];
-    return result;
+    return { ...result, ...patientDemographics(doc) };
   }
 
   private normalizeClinicIds(value: unknown): string[] {
@@ -522,7 +523,7 @@ export class UsersService {
     }
 
     const unset: Record<string, number> = {};
-    for (const field of ['emailAddress', 'mobileNumber', 'otpVerifiedAt']) {
+    for (const field of ['emailAddress', 'mobileNumber', 'otpVerifiedAt', ...DEMOGRAPHIC_FIELDS]) {
       if (doc[field] === '' || doc[field] === null) { unset[field] = 1; delete doc[field]; }
     }
     if (Array.isArray(doc.clinics) && doc.clinics.length === 0) unset.clinic = 1;

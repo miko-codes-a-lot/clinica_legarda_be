@@ -9,7 +9,7 @@ import { clinicMembershipFilter } from '../users/clinic-membership';
 import { careScope, requireCareClinic, requireCareStaff } from './care-policy';
 import { Visit } from './entities/visit.entity';
 
-export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address';
+export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address birthDate sex occupation religion maritalStatus';
 export const CARE_CLINIC_FIELDS = '_id name address mobileNumber';
 export const CARE_CLINICIAN_FIELDS = '_id firstName middleName lastName';
 
