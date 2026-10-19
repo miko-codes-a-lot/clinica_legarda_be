@@ -15,4 +15,8 @@ export class PatientRecordsController {
   detail(@User() actor: UserActor, @Param('id') id: string, @Query(new ValidationPipe({ transform: true, whitelist: true })) query: CareClinicQueryDto) {
     return this.records.findOne(actor, id, query.clinic);
   }
+  @Get(':id/report')
+  report(@User() actor: UserActor, @Param('id') id: string, @Query(new ValidationPipe({ transform: true, whitelist: true })) query: CareClinicQueryDto) {
+    return this.records.report(actor, id, query.clinic);
+  }
 }

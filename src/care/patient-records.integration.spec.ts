@@ -57,7 +57,7 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     } };
     const module = await Test.createTestingModule({ controllers: [PatientCareController, PatientRecordsController, VisitsController, TreatmentCasesController, AppointmentsController, UsersController], providers: [
       { provide: PatientCareService, useValue: new PatientCareService(visits, cases, appointments) },
-      { provide: PatientRecordsService, useValue: new PatientRecordsService(access, users, appointments) },
+      { provide: PatientRecordsService, useValue: new PatientRecordsService(access, users, appointments, visits, cases, connection.model<Clinic>(Clinic.name)) },
       { provide: VisitsService, useValue: new VisitsService(access, visits, users, connection.model<Clinic>(Clinic.name), appointments, cases) },
       { provide: TreatmentCasesService, useValue: new TreatmentCasesService(access, cases, visits, appointments, users, connection.model<Clinic>(Clinic.name)) },
       { provide: UsersService, useValue: new UsersService(users, connection.model<Clinic>(Clinic.name), appointments, visits) },
@@ -138,6 +138,21 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     expect(detail.body.appointments[0].clinic._id).toBe(fixture.clinic);
     await get(`/care/patients/${fixture.outsidePatient}`, fixture.admin).expect(403);
     await get(`/care/patients?clinic=${fixture.outside}`, fixture.admin).expect(403);
+  });
+  it('returns a consistent staff export snapshot with only authorized clinic history and rejects patient access', async () => {
+    const common = { patient: fixture.patient, dentist: fixture.dentist, state: 'completed', date: manilaDay(), checkedInAt: new Date(), purpose: 'consultation', createdBy: fixture.admin };
+    const here = await visits.create({ ...common, clinic: fixture.clinic, assessment: 'AUTHORIZED_ASSESSMENT', summary: 'Visit summary' });
+    const outside = await visits.create({ ...common, clinic: fixture.outside, assessment: 'OUTSIDE_PRIVATE_ASSESSMENT', summary: 'Outside summary' });
+    await cases.create([{ ...common, clinic: fixture.clinic, consultationVisit: here._id, title: 'Authorized case', plan: 'Plan' },
+      { ...common, clinic: fixture.outside, consultationVisit: outside._id, title: 'OUTSIDE_PRIVATE_CASE', plan: 'Other plan' }]);
+    const result = await get(`/care/patients/${fixture.patient}/report`, fixture.admin).expect(200);
+    expect(result.body.record.appointments).toHaveLength(1); expect(result.body.visits).toHaveLength(1); expect(result.body.cases).toHaveLength(1);
+    expect(result.body.visits[0].assessment).toBe('AUTHORIZED_ASSESSMENT'); expect(result.body.generatedAt).toBeTruthy();
+    expect(JSON.stringify(result.body)).not.toMatch(/OUTSIDE_PRIVATE|secret-fixture|password|resetOtp/);
+    await get(`/care/patients/${fixture.patient}/report`, fixture.patient).expect(403);
+    await get(`/care/patients/${fixture.patient}/report?clinic=${fixture.outside}`, fixture.admin).expect(403);
+    await users.updateOne({ _id: fixture.admin }, { clinics: [] });
+    await get(`/care/patients/${fixture.patient}/report`, fixture.admin).expect(403);
   });
   it('resolves current membership and gives unassigned admins empty search', async () => {
     expect((await get('/care/patients', fixture.noClinic).expect(200)).body.total).toBe(0);

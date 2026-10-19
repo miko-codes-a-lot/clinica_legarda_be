@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User } from '../users/entities/user.entity';
@@ -8,6 +8,10 @@ import { CareAccessService, CARE_CLINIC_FIELDS, CARE_CLINICIAN_FIELDS, CARE_PERS
 import { patientSearchFilter, requireCareStaff } from './care-policy';
 import { PatientSearchDto } from './dto/patient-search.dto';
 import { patientSearchOptions } from './patient-search-options';
+import { Visit } from './entities/visit.entity';
+import { TreatmentCase } from './entities/treatment-case.entity';
+import { Clinic } from '../clinics/entities/clinic.entity';
+import { referenceId } from '../auth/reference-id';
 
 @Injectable()
 export class PatientRecordsService {
@@ -15,6 +19,9 @@ export class PatientRecordsService {
     private readonly access: CareAccessService,
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
+    @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
+    @InjectModel(TreatmentCase.name) private readonly cases?: Model<TreatmentCase>,
+    @InjectModel(Clinic.name) private readonly clinics?: Model<Clinic>,
   ) {}
 
   async search(actor: UserActor, query: PatientSearchDto) {
@@ -40,5 +47,24 @@ export class PatientRecordsService {
       .populate({ path: 'dentist', select: CARE_CLINICIAN_FIELDS })
       .populate({ path: 'services', select: '_id name' }).sort({ date: -1, startTime: -1 }).lean().exec();
     return { patient, appointments };
+  }
+
+  async report(actor: UserActor, id: string, clinic?: string) {
+    requireCareStaff(actor);
+    if (!this.visits || !this.cases) throw new ServiceUnavailableException('Patient record export is unavailable.');
+    return this.appointments.db.transaction(async session => {
+      const patient = await this.access.requirePatient(actor, id, clinic, session);
+      const scope = { patient: patient._id, ...this.access.scope(actor, clinic) };
+      const appointments = await this.appointments.find(scope).select('_id clinic dentist date startTime endTime status isWalkIn services careCase')
+        .populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }, { path: 'services', select: '_id name' }])
+        .session(session).sort({ date: -1, startTime: -1 }).lean();
+      const visits = await this.visits!.find(scope).populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }])
+        .session(session).sort({ checkedInAt: -1 }).lean();
+      const cases = await this.cases!.find(scope).populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }])
+        .session(session).sort({ createdAt: -1 }).lean();
+      const location = clinic && this.clinics ? await this.clinics.findById(referenceId(clinic)).select('name').session(session) : null;
+      return { record: { patient, appointments }, visits, cases, generatedAt: new Date().toISOString(),
+        scopeLabel: clinic ? location?.name ?? 'Selected clinic' : actor.role === 'admin' ? 'Assigned clinics' : actor.role === 'dentist' ? 'My authorized patient records' : 'All clinics' };
+    });
   }
 }
