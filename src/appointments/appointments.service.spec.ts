@@ -13,14 +13,18 @@ import { Visit } from '../care/entities/visit.entity';
 import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
 
 describe('Appointment changes', () => {
+  beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-01').getTime()));
+  afterEach(() => jest.restoreAllMocks());
   const actor = { sub: '000000000000000000000002', role: 'user' };
   const AppointmentModel = model('AppointmentChangeTest', AppointmentSchema);
   let service: AppointmentsService;
   let current: InstanceType<typeof AppointmentModel>;
   let update: jest.Mock;
   let findOne: jest.Mock;
+  let activeVisit: boolean;
 
   beforeEach(async () => {
+    activeVisit = false;
     current = new AppointmentModel({
       createdBy: actor.sub,
       clinic: '000000000000000000000001', patient: '000000000000000000000002',
@@ -41,7 +45,7 @@ describe('Appointment changes', () => {
       { provide: getModelToken(Referral.name), useValue: {} },
       { provide: getModelToken(User.name), useValue: { exists: () => ({ session: async () => ({ _id: actor.sub }) }) } },
       { provide: getModelToken(TreatmentCase.name), useValue: {} },
-      { provide: getModelToken(Visit.name), useValue: { exists: () => ({ session: async () => null }) } },
+      { provide: getModelToken(Visit.name), useValue: { exists: () => ({ session: async () => activeVisit ? {} : null }) } },
       { provide: getModelToken(Appointment.name), useValue: {
         findById: () => {
           const query = { session: () => query, populate: () => query, exec: async () => current };
@@ -60,6 +64,21 @@ describe('Appointment changes', () => {
     const result = await service.cancel(current.id, actor, '  Work conflict  ');
     expect(result.status).toBe(AppointmentStatus.CANCELLED);
     expect(result.history.at(-1)).toMatchObject({ reason: 'Work conflict' });
+  });
+
+  it('blocks creator cancellation at the scheduled start without changing status or history', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-15T01:00:00Z').getTime());
+    await expect(service.cancel(current.id, actor, 'Too late')).rejects.toThrow('started');
+    expect(current.status).toBe(AppointmentStatus.CONFIRMED);
+    expect(current.history).toHaveLength(0);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('retains checked-in visit protection even before the scheduled start', async () => {
+    activeVisit = true;
+    await expect(service.cancel(current.id, actor, 'Already here')).rejects.toThrow('checked in');
+    expect(current.status).toBe(AppointmentStatus.CONFIRMED);
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('allows cancellation even when another appointment occupies the slot', async () => {

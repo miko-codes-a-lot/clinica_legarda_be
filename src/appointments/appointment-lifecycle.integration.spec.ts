@@ -108,6 +108,7 @@ localTests('Appointment lifecycle', () => {
     await app.init();
   });
   beforeEach(async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-01').getTime());
     await appointments.deleteMany({});
     await referrals.deleteMany({});
     await users.deleteMany({});
@@ -164,6 +165,7 @@ localTests('Appointment lifecycle', () => {
       referral: referral.id,
     };
   });
+  afterEach(() => jest.restoreAllMocks());
   afterAll(async () => {
     await app?.close();
     await connection?.close();
@@ -179,6 +181,14 @@ localTests('Appointment lifecycle', () => {
   });
   const setStatus = async (status: Status) =>
     appointments.updateOne({ _id: fixture.appointment }, { $set: { status } });
+
+  it('rejects cancellation at the start even for the creator and preserves the appointment', async () => {
+    const created = await service.create(booking(), actor('user'));
+    const before = await appointments.findById(created._id).lean();
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-21T06:00:00Z').getTime());
+    await expect(service.cancel(created._id.toString(), actor('user'), 'Too late')).rejects.toBeInstanceOf(ConflictException);
+    expect(await appointments.findById(created._id).lean()).toEqual(before);
+  });
 
   it('records the authenticated creator and ignores forged creator/history in creation and edits', async () => {
     const forged = { createdBy: fixture.dentist, history: [{ action: 'Appointment created.', actorId: fixture.dentist }] };

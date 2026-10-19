@@ -41,6 +41,7 @@ import { Visit } from '../care/entities/visit.entity';
 import { TreatmentCase } from '../care/entities/treatment-case.entity';
 import { assertCareCaseLink } from '../care/clinical-rules';
 import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
+import { appointmentStart } from './appointment-time';
 
 @Injectable()
 export class AppointmentsService {
@@ -476,6 +477,9 @@ export class AppointmentsService {
         )?.actorId;
         if (!creator || !Types.ObjectId.isValid(creator) || !sameId(creator, actor.sub)) {
           throw new ForbiddenException('Only the person who created this appointment may cancel it.');
+        }
+        if (Date.now() >= appointmentStart(current.date, current.startTime).getTime()) {
+          throw new ConflictException('This appointment has already started. Contact the clinic to resolve its outcome.');
         }
       }
       if (status !== AppointmentStatus.CONFIRMED) await this.requireNoActiveVisit(current, session);
