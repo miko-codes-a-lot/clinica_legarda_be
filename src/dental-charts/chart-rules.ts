@@ -14,7 +14,7 @@ export function chartTeeth(dentition: string, input: unknown): ToothObservation[
     if (!entry || typeof entry !== 'object' || !('tooth' in entry) || typeof entry.tooth !== 'number' || !allowed.includes(entry.tooth) || seen.has(entry.tooth)) throw new BadRequestException('Tooth numbers must be valid, unique and match the selected dentition.');
     seen.add(entry.tooth);
     if (!('observation' in entry) || typeof entry.observation !== 'string' || !entry.observation.trim() || entry.observation.trim().length > 1000) throw new BadRequestException('Enter an observation of 1–1000 characters for each recorded tooth.');
-    const notes = 'notes' in entry ? entry.notes : '';
+    const notes = 'notes' in entry ? entry.notes ?? '' : '';
     if (typeof notes !== 'string' || notes.trim().length > 2000) throw new BadRequestException('Tooth notes must be text of at most 2000 characters.');
     return { tooth: entry.tooth, observation: entry.observation.trim(), notes: notes.trim() };
   }).sort((a,b) => a.tooth - b.tooth);

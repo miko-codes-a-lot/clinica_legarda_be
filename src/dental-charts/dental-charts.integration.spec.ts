@@ -93,6 +93,10 @@ const uri = process.env.CLINICA_PANELIST_TEST_URI;
       await request(app.getHttpServer()).put(`/dental-charts/${f.patient}`).set('x-fixture-user', f.dentist).send({ ...payload(), expectedRevision: -1 }).expect(400);
       const saved = await request(app.getHttpServer()).put(`/dental-charts/${f.patient}`).set('x-fixture-user', f.dentist).send({ ...payload(), updatedBy: f.admin }).expect(200);
       expect(saved.body.chart.updatedBy._id).toBe(f.dentist);
+      const optionalNotes = { ...payload(), dentition: 'primary', teeth: [{ tooth: 51, observation: 'Primary observation' }] };
+      const primary = await request(app.getHttpServer()).put(`/dental-charts/${f.patient}`).set('x-fixture-user', f.dentist).send(optionalNotes).expect(200);
+      expect(primary.body.chart.teeth[0].notes).toBe('');
+      await request(app.getHttpServer()).put(`/dental-charts/${f.patient}`).set('x-fixture-user', f.dentist).send(optionalNotes).expect(409);
       await request(app.getHttpServer()).get(`/dental-charts/${f.patient}?clinic=${f.clinic}&dentition=permanent&revision=1`).set('x-fixture-user', f.patient).expect(403);
       await request(app.getHttpServer()).get(`/dental-charts/${f.patient}?clinic=${f.clinic}&dentition=permanent&revision=-1`).set('x-fixture-user', f.dentist).expect(400);
     } finally { await app.close(); }
