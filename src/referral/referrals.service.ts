@@ -15,6 +15,7 @@ import { isAdmin, UserActor } from '../auth/role-policy';
 import { referenceId, sameId } from '../auth/record-policy';
 import { APPOINTMENT_PERSON_FIELDS } from '../users/user-projections';
 import { adminClinicIds, adminClinicScope, assertClinicAccess, canAccessClinic } from '../auth/clinic-policy';
+import { referralReason } from './referral-reason';
 
 @Injectable()
 export class ReferralsService {
@@ -157,7 +158,7 @@ export class ReferralsService {
       await this.referralModel
         .findByIdAndUpdate(
           id,
-          { $set: { reason: doc.reason } },
+          { $set: { ...(doc.reason !== undefined ? { reason: referralReason(doc.reason, referral.reason) } : {}) } },
           { runValidators: true },
         )
         .exec();
@@ -195,7 +196,7 @@ export class ReferralsService {
       createdBy: referenceId(actor.sub),
       fromDoctorId: sourceDentist,
       fromClinicId: sourceClinic,
-      reason: doc.reason,
+      reason: referralReason(doc.reason),
       status: ReferralStatus.PENDING,
     });
     return this.findOne(referral.id, actor);
@@ -215,8 +216,7 @@ export class ReferralsService {
 
   async reject(reasonOfDecline: string, id: string, actor: UserActor) {
     await this.authorized(id, actor, true);
-    if (typeof reasonOfDecline !== 'string')
-      throw new BadRequestException('Decline reason must be text.');
+    reasonOfDecline = referralReason(reasonOfDecline);
     await this.appointmentService.rejectLinkedReferral(
       id,
       actor,

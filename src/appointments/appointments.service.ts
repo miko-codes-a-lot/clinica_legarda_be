@@ -42,6 +42,7 @@ import { TreatmentCase } from '../care/entities/treatment-case.entity';
 import { assertCareCaseLink } from '../care/clinical-rules';
 import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
 import { appointmentStart } from './appointment-time';
+import { referralReason } from '../referral/referral-reason';
 
 @Injectable()
 export class AppointmentsService {
@@ -381,6 +382,7 @@ export class AppointmentsService {
     actor: UserActor,
     reasonOfDecline: string,
   ) {
+    reasonOfDecline = referralReason(reasonOfDecline);
     const referral = await this.referralModel
       .findById(referenceId(referralId))
       .exec();
@@ -457,6 +459,7 @@ export class AppointmentsService {
     actor: UserActor,
     reason?: string,
   ) {
+    if (status === AppointmentStatus.REJECTED) reason = referralReason(reason);
     await this.withExistingSchedule(id, actor, [], async (current, session) => {
       authorizeAppointment(
         actor,

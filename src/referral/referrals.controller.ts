@@ -10,11 +10,14 @@ import {
   HttpStatus,
   Put,
   Patch,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ReferralsService } from './referrals.service';
 import { ReferralUpsertDto } from './dto/referral-upsert.dto';
 
 @Controller('referrals')
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class ReferralsController {
   constructor(private readonly referralsService: ReferralsService) {}
 

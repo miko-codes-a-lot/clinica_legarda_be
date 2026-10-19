@@ -515,6 +515,18 @@ localTests('Record access boundaries', () => {
       referralService.findOne(created._id.toString(), actor('user', true)),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
+  it('round-trips free-text reasons and retains unchanged legacy codes without accepting blank replacements', async () => {
+    const referral = await referralService.upsert(source({ reason: '  Patient needs specialist care  ' }), undefined, actor('user'));
+    expect(referral.reason).toBe('Patient needs specialist care');
+    for (const reason of ['  ', 'ab', 'a'.repeat(501)]) await expect(referralService.upsert(source({ reason }), undefined, actor('user'))).rejects.toThrow();
+    await referrals.updateOne({ _id: referral._id }, { reason: 'X' });
+    const legacy = await referralService.upsert(source({ reason: 'X' }), referral._id.toString(), actor('user'));
+    expect(legacy.reason).toBe('X');
+    await expect(referralService.upsert(source({ reason: 'Y' }), referral._id.toString(), actor('user'))).rejects.toThrow();
+    await expect(referralService.reject('  ', referral._id.toString(), actor('dentist'))).rejects.toThrow();
+    const result = await referralService.reject('  Specialist is unavailable this week  ', referral._id.toString(), actor('dentist'));
+    expect(result.reasonOfDecline).toBe('Specialist is unavailable this week');
+  });
 
   it('allows authorized intermediate referral linking but rejects forged, reused, and legacy-unowned links', async () => {
     const created = await referralService.upsert(
