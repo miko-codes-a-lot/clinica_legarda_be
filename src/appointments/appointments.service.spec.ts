@@ -22,9 +22,11 @@ describe('Appointment changes', () => {
   let update: jest.Mock;
   let findOne: jest.Mock;
   let activeVisit: boolean;
+  let enqueueEmail: jest.Mock;
 
   beforeEach(async () => {
     activeVisit = false;
+    enqueueEmail = jest.fn().mockResolvedValue([]);
     current = new AppointmentModel({
       createdBy: actor.sub,
       clinic: '000000000000000000000001', patient: '000000000000000000000002',
@@ -41,7 +43,7 @@ describe('Appointment changes', () => {
       return query;
     });
     const module = await Test.createTestingModule({ providers: [AppointmentsService,
-      { provide: getModelToken(AppointmentChangeEmail.name), useValue: {} },
+      { provide: getModelToken(AppointmentChangeEmail.name), useValue: { create: enqueueEmail } },
       { provide: getModelToken(Referral.name), useValue: {} },
       { provide: getModelToken(User.name), useValue: { exists: () => ({ session: async () => ({ _id: actor.sub }) }) } },
       { provide: getModelToken(TreatmentCase.name), useValue: {} },
@@ -64,6 +66,7 @@ describe('Appointment changes', () => {
     const result = await service.cancel(current.id, actor, '  Work conflict  ');
     expect(result.status).toBe(AppointmentStatus.CANCELLED);
     expect(result.history.at(-1)).toMatchObject({ reason: 'Work conflict' });
+    expect(enqueueEmail).toHaveBeenCalledWith([expect.objectContaining({ kind: 'cancelled', reason: 'Work conflict' })], expect.objectContaining({ session: expect.anything() }));
   });
 
   it('blocks creator cancellation at the scheduled start without changing status or history', async () => {
