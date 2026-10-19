@@ -1,3 +1,4 @@
+import { DentalChart, DentalChartSchema, DentalChartVersion, DentalChartVersionSchema } from '../dental-charts/entities/dental-chart.entity';
 import { ProfilePictureGuard } from './profile-picture.guard';
 import {
   Appointment,
@@ -16,6 +17,8 @@ import { PatientRecordChangesModule } from '../patient-record-changes/patient-re
   imports: [
     PatientRecordChangesModule,
     MongooseModule.forFeature([
+      { name: DentalChart.name, schema: DentalChartSchema },
+      { name: DentalChartVersion.name, schema: DentalChartVersionSchema },
       { name: User.name, schema: UserSchema },
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Clinic.name, schema: ClinicSchema },

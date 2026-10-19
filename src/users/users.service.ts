@@ -1,3 +1,4 @@
+import { DentalChart, DentalChartVersion } from '../dental-charts/entities/dental-chart.entity';
 import { findPatientRecipient } from './patient-recipient';
 import {
   BadRequestException,
@@ -37,6 +38,8 @@ export class UsersService {
     private readonly appointmentModel: Model<Appointment>,
     @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
     @Optional() private readonly patientChanges?: PatientRecordChangesService,
+    @InjectModel(DentalChart.name) private readonly charts?: Model<DentalChart>,
+    @InjectModel(DentalChartVersion.name) private readonly chartVersions?: Model<DentalChartVersion>,
   ) {}
 
   findByOneUsername(username: string) {
@@ -589,6 +592,8 @@ export class UsersService {
   }
 
   private async requireNoCareHistory(id: string, session: ClientSession, includeAudit = false) {
+    const chartReference = { $or: [{ patient: id }, { updatedBy: id }] };
+    if ((this.charts && await this.charts.exists(chartReference).session(session)) || (this.chartVersions && await this.chartVersions.exists(chartReference).session(session))) throw new ConflictException('This account is referenced by retained dental charts. Keep its identity and role.');
     if (await this.userModel.exists({ guardian: id, isDependent: true }).session(session)) throw new ConflictException('Remove or transfer linked child relationships before deleting or changing this parent account.');
     if (await this.userModel.exists({ _id: id, isDependent: true }).session(session) && await this.appointmentModel.exists({ patient: id }).session(session)) throw new ConflictException('This child has retained appointment records. Keep the patient identity.');
     if (this.visits && await this.visits.exists({ $or: [

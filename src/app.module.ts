@@ -1,3 +1,4 @@
+import { DentalChartsModule } from './dental-charts/dental-charts.module';
 import { DependentsModule } from './dependents/dependents.module';
 import { ClinicClosuresModule } from './clinic-closures/clinic-closures.module';
 import { Module } from '@nestjs/common';
@@ -57,6 +58,7 @@ import { AppointmentNoShowsModule } from './appointment-no-shows/appointment-no-
     ReasonModule,
     ChatbotModule,
     CareModule,
+    DentalChartsModule,
     ClinicClosuresModule,
   ],
   controllers: [AppController],

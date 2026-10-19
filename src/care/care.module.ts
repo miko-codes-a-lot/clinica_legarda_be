@@ -1,3 +1,4 @@
+import { DentalChart, DentalChartSchema } from '../dental-charts/entities/dental-chart.entity';
 import { PatientCareController } from './patient-care.controller';
 import { PatientCareService } from './patient-care.service';
 import { ClinicClosure, ClinicClosureSchema } from '../clinic-closures/entities/clinic-closure.entity';
@@ -20,6 +21,7 @@ import { PatientRecordChangesModule } from '../patient-record-changes/patient-re
 
 @Module({
   imports: [PatientRecordChangesModule, MongooseModule.forFeature([
+    { name: DentalChart.name, schema: DentalChartSchema },
     { name: User.name, schema: UserSchema },
     { name: Appointment.name, schema: AppointmentSchema },
     { name: Clinic.name, schema: ClinicSchema },

@@ -1,3 +1,5 @@
+import { assignedClinicIds } from '../users/clinic-membership';
+import { DentalChart } from '../dental-charts/entities/dental-chart.entity';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -22,6 +24,7 @@ export class PatientRecordsService {
     @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
     @InjectModel(TreatmentCase.name) private readonly cases?: Model<TreatmentCase>,
     @InjectModel(Clinic.name) private readonly clinics?: Model<Clinic>,
+    @InjectModel(DentalChart.name) private readonly charts?: Model<DentalChart>,
   ) {}
 
   async search(actor: UserActor, query: PatientSearchDto) {
@@ -62,8 +65,13 @@ export class PatientRecordsService {
         .session(session).sort({ checkedInAt: -1 }).lean();
       const cases = await this.cases!.find(scope).populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }])
         .session(session).sort({ createdAt: -1 }).lean();
+      const memberships = actor.role === 'admin' ? await this.users.findById(patient._id).select('clinic clinics').session(session).lean() : null;
+      const chartClinics = [...new Set([...appointments.map(row => referenceId(row.clinic)), ...visits.map(row => referenceId(row.clinic)), ...(memberships ? assignedClinicIds(memberships) : [])])]
+        .filter(id => (actor.clinics ?? []).map(referenceId).includes(id));
+      const charts = this.charts ? await this.charts.find({ patient: patient._id, ...(clinic ? { clinic: referenceId(clinic) } : actor.role === 'admin' || actor.role === 'dentist' ? { clinic: { $in: chartClinics } } : {}) })
+        .populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'updatedBy', select: CARE_CLINICIAN_FIELDS }]).session(session).sort({ clinic: 1, dentition: 1 }).lean() : [];
       const location = clinic && this.clinics ? await this.clinics.findById(referenceId(clinic)).select('name').session(session) : null;
-      return { record: { patient, appointments }, visits, cases, generatedAt: new Date().toISOString(),
+      return { record: { patient, appointments }, visits, cases, charts, generatedAt: new Date().toISOString(),
         scopeLabel: clinic ? location?.name ?? 'Selected clinic' : actor.role === 'admin' ? 'Assigned clinics' : actor.role === 'dentist' ? 'My authorized patient records' : 'All clinics' };
     });
   }
