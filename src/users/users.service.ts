@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './entities/user.entity';
@@ -22,6 +23,8 @@ import {
 import { UserStatus } from 'src/_shared/enum/user-status.enum';
 import { adminClinicIds, adminClinicScope, visibleClinicMemberships } from '../auth/clinic-policy';
 import { Visit } from '../care/entities/visit.entity';
+import { PatientRecordChangesService, changedPatientFields, PROFILE_AUDIT_FIELDS } from '../patient-record-changes/patient-record-changes.service';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class UsersService {
@@ -31,6 +34,7 @@ export class UsersService {
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
     @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
+    @Optional() private readonly patientChanges?: PatientRecordChangesService,
   ) {}
 
   findByOneUsername(username: string) {
@@ -174,6 +178,17 @@ export class UsersService {
 
   async updateProfilePicture(id: string, fileName: string, actor: UserActor) {
     await this.authorizePictureWrite(id, actor);
+    if (this.patientChanges) {
+      return this.userModel.db.transaction(async session => {
+        await this.userModel.updateOne({ _id: id }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
+        const before = await this.userModel.findById(id).session(session);
+        if (!before) throw new NotFoundException('User not found.');
+        const saved = await this.userModel.findByIdAndUpdate(id, { profilePicture: fileName }, { new: true, runValidators: true, session });
+        if (!saved) throw new NotFoundException('User not found.');
+        if (before.role === 'user') await this.recordProfileChange(before, saved, actor, session);
+        return this.visibleUser(saved, actor);
+      });
+    }
     const updated = await this.userModel.findByIdAndUpdate(
       id,
       { profilePicture: fileName },
@@ -387,15 +402,33 @@ export class UsersService {
       writeCondition.status = existing.status;
       writeCondition.role = existing.role;
     }
-    const saved = existing && update.role !== undefined && update.role !== existing.role && this.visits
+    const save = async (session?: ClientSession) => {
+      const before = session && existing ? await this.userModel.findById(existing._id).session(session) : existing;
+      const saved = await this.persist({ ...update }, id, writeCondition, session);
+      if (session && before?.role === 'user' && saved) await this.recordProfileChange(before, saved, actor, session);
+      return saved;
+    };
+    const changingRole = existing && update.role !== undefined && update.role !== existing.role;
+    const saved = existing && ((changingRole && this.visits) || (this.patientChanges && existing.role === 'user'))
       ? await this.userModel.db.transaction(async session => {
         const locked = await this.userModel.updateOne({ _id: existing._id, role: existing.role }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
         if (!locked.matchedCount) throw new ConflictException('The account changed. Reload before changing its role.');
-        await this.requireNoCareHistory(referenceId(existing._id), session);
-        return this.persist(update, id, writeCondition, session);
+        if (changingRole) await this.requireNoCareHistory(referenceId(existing._id), session);
+        return save(session);
       })
-      : await this.persist(update, id, writeCondition);
+      : await save();
     return saved ? this.visibleUser(saved, actor) : saved;
+  }
+
+  private async recordProfileChange(before: HydratedDocument<User>, after: HydratedDocument<User>, actor: UserActor, session: ClientSession) {
+    if (!this.patientChanges) return;
+    const fields = changedPatientFields(before, after, PROFILE_AUDIT_FIELDS); if (!fields.length) return;
+    const clinics = [...assignedClinicIds(before), ...assignedClinicIds(after),
+      ...(await this.appointmentModel.distinct('clinic', { patient: before._id }).session(session)).map(referenceId),
+      ...(this.visits ? (await this.visits.distinct('clinic', { patient: before._id }).session(session)).map(referenceId) : [])];
+    const scope = [...new Set(clinics.map(referenceId))].filter(clinic => actor.role !== 'admin' || adminClinicIds(actor).includes(clinic));
+    await this.patientChanges.recordPatientChange(session, { patient: referenceId(before._id), clinicScope: scope, actor,
+      kind: 'profile', fields, sourceEventId: `profile:${before.id}:${randomUUID()}` });
   }
 
   private async hasOutsideClinicAccess(user: User, actor: UserActor) {

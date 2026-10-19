@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AppointmentStatus } from 'src/_shared/enum/appointment-status.enum';
@@ -8,11 +8,14 @@ import { Referral } from 'src/referral/entities/referral.entity';
 import { appointmentScope, referenceId } from '../auth/record-policy';
 import { isAdmin, UserActor } from '../auth/role-policy';
 import { assertClinicAccess } from '../auth/clinic-policy';
-import { reportPeriod } from './report-period';
+import { reportPeriod, ReportQuery } from './report-period';
+import { PatientRecordChangesService } from '../patient-record-changes/patient-record-changes.service';
+import { adminClinicIds } from '../auth/clinic-policy';
 import {
   DailyQueueResponse,
   WeeklySummaryResponse,
   WeeklyTrendResponse,
+  ClinicAnalyticsReport,
 } from './report-responses';
 
 type Period = ReturnType<typeof reportPeriod>;
@@ -55,7 +58,56 @@ export class AnalyticsService {
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
     @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
+    @Optional() private readonly recordChanges?: PatientRecordChangesService,
   ) {}
+
+  async getReport(clinicId: string, actor: UserActor, query: ReportQuery = {}): Promise<ClinicAnalyticsReport> {
+    // The combined patient-record audit report is an administrator capability.
+    // Existing dentist-only appointment report endpoints retain their ownership rules.
+    if (!isAdmin(actor)) throw new ForbiddenException('Only administrators may access combined clinic reports.');
+    const scope = reportScope(clinicId, actor), period = reportPeriod(new Date(Date.now()), query);
+    if (!this.recordChanges) throw new ServiceUnavailableException('Patient record reporting is unavailable.');
+    const coverageFrom = await this.recordChanges.coverage();
+    const auditScope = clinicId !== 'all' ? { clinicScope: referenceId(clinicId) } : actor.role === 'admin'
+      ? { clinicScope: { $in: adminClinicIds(actor) } } : { 'clinicScope.0': { $exists: true } };
+    return this.appointmentModel.db.transaction(async session => {
+      const records = await this.appointmentModel.find({ ...scope, date: { $gte: period.appointmentStart, $lt: period.appointmentEnd } })
+        .select('date status services patient').populate('services', '_id name').session(session).lean();
+      const changes = await this.recordChanges!.inPeriod(auditScope, period.updateStart, period.updateEnd, session);
+      const empty = () => Array<number>(period.bucketKeys.length).fill(0);
+      const appointments = empty(), completed = empty(), noShow = empty(), counts = empty();
+      const statuses: Record<string, number> = Object.fromEntries(Object.values(AppointmentStatus).map(status => [status, 0]));
+      const preferredServices = new Map<string, number>(), serviceTrend = new Map<string, number[]>();
+      const bucket = (date: string) => period.bucketKeys.indexOf(date.slice(0, period.kind === 'year' ? 7 : 10));
+      for (const record of records) {
+        const index = bucket(record.date.toISOString()); if (index < 0) continue;
+        appointments[index]++; statuses[record.status] = (statuses[record.status] ?? 0) + 1;
+        if (record.status === AppointmentStatus.COMPLETED) completed[index]++;
+        if (record.status === AppointmentStatus.NO_SHOW) noShow[index]++;
+        const services = new Map(record.services.filter(Boolean).map(service => [referenceId(service), service.name]));
+        for (const name of services.values()) {
+          if (!name) continue;
+          preferredServices.set(name, (preferredServices.get(name) ?? 0) + 1);
+          const trend = serviceTrend.get(name) ?? empty(); trend[index]++; serviceTrend.set(name, trend);
+        }
+      }
+      for (const change of changes) {
+        const localDate = new Date(change.createdAt.getTime() + 8 * 60 * 60 * 1000).toISOString(), index = bucket(localDate);
+        if (index >= 0) counts[index]++;
+      }
+      const completedCount = statuses[AppointmentStatus.COMPLETED], noShowCount = statuses[AppointmentStatus.NO_SHOW];
+      return { clinicId, generatedAt: new Date(Date.now()).toISOString(),
+        period: { kind: period.kind, anchor: period.anchor, start: period.start, end: period.end, bucketKeys: period.bucketKeys, labels: period.labels },
+        totalAppointments: records.length, uniquePatients: new Set(records.map(row => referenceId(row.patient))).size, statuses,
+        completed: completedCount, noShow: noShowCount, completedShare: records.length ? completedCount / records.length : 0,
+        noShowRate: completedCount + noShowCount ? noShowCount / (completedCount + noShowCount) : 0,
+        preferredServices: Object.fromEntries(preferredServices), trend: { appointments, completed, noShow, serviceTrend: Object.fromEntries(serviceTrend) },
+        patientRecordChanges: { events: changes.length, patients: new Set(changes.map(row => row.patient.toString())).size, counts, coverageFrom },
+        metricDefinitions: { completedShare: 'Completed appointments / all appointments in the selected period.',
+          noShowRate: 'No-show rate among resolved outcomes: No-show / (completed + No-show).',
+          patientRecordChanges: 'Actual profile and clinical record changes recorded since audit activation. Unchanged saves, sign-in activity and appointment updates are excluded. Historical changes have not been reconstructed.' } };
+    });
+  }
 
   private weeklyAppointments(
     scope: Record<string, unknown>,

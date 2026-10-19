@@ -1,7 +1,8 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query, ValidationPipe } from '@nestjs/common';
 import { User } from '../_shared/decorators/user.decorator';
 import { UserActor } from '../auth/role-policy';
 import { AnalyticsService } from './analytics.service';
+import { ReportQueryDto } from './dto/report-query.dto';
 import {
   DailyQueueResponse,
   WeeklySummaryResponse,
@@ -11,6 +12,12 @@ import {
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
+
+  @Get('report/:clinicId')
+  getReport(@Param('clinicId') clinicId: string, @User() actor: UserActor,
+    @Query(new ValidationPipe({ transform: true, whitelist: true })) query: ReportQueryDto) {
+    return this.analyticsService.getReport(clinicId, actor, query);
+  }
 
   @Get('summary/:clinicId')
   getWeeklySummary(

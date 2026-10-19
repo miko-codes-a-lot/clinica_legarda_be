@@ -1,6 +1,6 @@
 import { ClinicClosure } from '../clinic-closures/entities/clinic-closure.entity';
 import { assertOpenInterval } from '../clinic-closures/closure-rules';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model } from 'mongoose';
 import { UserActor } from '../auth/role-policy';
@@ -18,6 +18,7 @@ import { assertAppointmentCheckIn, assertIntakePatient, assertQueueTransition, m
 import { VisitRecordDto } from './dto/visit-record.dto';
 import { assertCareCaseLink, assertClinicalRecordWrite } from './clinical-rules';
 import { TreatmentCase } from './entities/treatment-case.entity';
+import { PatientRecordChangesService, changedPatientFields, CLINICAL_AUDIT_FIELDS } from '../patient-record-changes/patient-record-changes.service';
 
 @Injectable()
 export class VisitsService implements OnModuleInit {
@@ -29,6 +30,7 @@ export class VisitsService implements OnModuleInit {
     @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
     @InjectModel(TreatmentCase.name) private readonly cases?: Model<TreatmentCase>,
     @InjectModel(ClinicClosure.name) private readonly closures?: Model<ClinicClosure>,
+    @Optional() private readonly patientChanges?: PatientRecordChangesService,
   ) {}
   async onModuleInit() { await this.visits.init(); }
 
@@ -156,9 +158,11 @@ export class VisitsService implements OnModuleInit {
       if (dto.treatments.some(item => !item.description.trim())) throw new BadRequestException('Treatment descriptions cannot be blank.');
       if (dto.complete && current.purpose === 'treatment' && !dto.treatments.length) throw new BadRequestException('Record at least one performed treatment before completing a treatment session.');
       const now = new Date();
+      const record = { assessment: dto.assessment.trim(), treatments: dto.treatments.map(item => ({ description: item.description.trim(), tooth: item.tooth?.trim(), notes: item.notes?.trim() })),
+        summary: dto.summary.trim(), aftercare: dto.aftercare.trim(), nextSteps: dto.nextSteps.trim(), state: dto.complete ? 'completed' : current.state };
+      const fields = changedPatientFields(current.toObject(), record, CLINICAL_AUDIT_FIELDS);
       const updated = await this.visits.updateOne({ _id: current._id, revision: dto.revision, state: 'in_progress' }, {
-        $set: { assessment: dto.assessment.trim(), treatments: dto.treatments.map(item => ({ description: item.description.trim(), tooth: item.tooth?.trim(), notes: item.notes?.trim() })),
-          summary: dto.summary.trim(), aftercare: dto.aftercare.trim(), nextSteps: dto.nextSteps.trim(),
+        $set: { ...record,
           clinicalAuthor: referenceId(actor.sub), clinicalUpdatedAt: now,
           ...(dto.complete ? { state: 'completed', endedAt: now } : {}),
         },
@@ -167,6 +171,8 @@ export class VisitsService implements OnModuleInit {
         $push: { events: { state: dto.complete ? 'completed' : 'record_saved', at: now, actor: referenceId(actor.sub) } },
       }, { session, runValidators: true });
       if (!updated.modifiedCount) throw new ConflictException('The clinical record changed. Reload before saving.');
+      if (this.patientChanges) await this.patientChanges.recordPatientChange(session, { patient: referenceId(current.patient), clinicScope: [referenceId(current.clinic)],
+        actor, kind: 'clinical', fields, sourceEventId: `visit:${current.id}:${dto.revision + 1}` });
       if (dto.complete && current.appointment) {
         const appointment = await this.appointments.updateOne({ _id: current.appointment, status: 'confirmed' }, {
           $set: { status: 'completed' }, $push: { history: { action: 'Appointment completed with visit summary.', actorId: referenceId(actor.sub), actorRole: actor.role, actorName: actor.username } },

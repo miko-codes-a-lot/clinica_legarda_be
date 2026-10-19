@@ -16,9 +16,10 @@ import { VisitsController } from './visits.controller';
 import { TreatmentCase, TreatmentCaseSchema } from './entities/treatment-case.entity';
 import { TreatmentCasesService } from './treatment-cases.service';
 import { TreatmentCasesController } from './treatment-cases.controller';
+import { PatientRecordChangesModule } from '../patient-record-changes/patient-record-changes.module';
 
 @Module({
-  imports: [MongooseModule.forFeature([
+  imports: [PatientRecordChangesModule, MongooseModule.forFeature([
     { name: User.name, schema: UserSchema },
     { name: Appointment.name, schema: AppointmentSchema },
     { name: Clinic.name, schema: ClinicSchema },

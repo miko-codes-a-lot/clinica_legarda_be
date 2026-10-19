@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsController } from './analytics.controller';
+import { PatientRecordChangesModule } from '../patient-record-changes/patient-record-changes.module';
 import {
   Appointment,
   AppointmentSchema,
@@ -13,6 +14,7 @@ import {
 
 @Module({
   imports: [
+    PatientRecordChangesModule,
     MongooseModule.forFeature([
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Referral.name, schema: ReferralSchema },

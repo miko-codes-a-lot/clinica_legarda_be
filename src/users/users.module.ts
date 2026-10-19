@@ -10,9 +10,11 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { User, UserSchema } from './entities/user.entity';
 import { Clinic, ClinicSchema } from 'src/clinics/entities/clinic.entity';
 import { Visit, VisitSchema } from '../care/entities/visit.entity';
+import { PatientRecordChangesModule } from '../patient-record-changes/patient-record-changes.module';
 
 @Module({
   imports: [
+    PatientRecordChangesModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Appointment.name, schema: AppointmentSchema },
