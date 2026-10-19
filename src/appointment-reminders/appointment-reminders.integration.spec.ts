@@ -54,6 +54,7 @@ const uri = process.env.TEST_REMINDER_MONGO_URI;
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', {
       clinicName: 'Test Clinic', clinicAddress: 'Test Address', date: '2026-10-10', startTime: '09:30', endTime: '10:00',
+      arrivalDeadline: new Date('2026-10-10T01:50:00Z'),
     });
     expect(await reminders.countDocuments({ sentAt: { $exists: true } })).toBe(1);
   });

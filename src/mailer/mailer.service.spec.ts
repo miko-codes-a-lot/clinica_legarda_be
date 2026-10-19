@@ -54,6 +54,32 @@ describe('OTP email identity', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('states the exact 20-minute arrival deadline in confirmation and reminder emails', async () => {
+    const appointment = { clinicName: 'Clinic', clinicAddress: '', date: '2026-10-21', startTime: '09:00', endTime: '09:15' };
+    const mailer = new MailerService();
+    await mailer.sendAppointmentChange('patient@clinic-mail.ph', {
+      ...appointment, kind: 'confirmed', changedAt: new Date('2026-10-20T00:00:00Z'),
+    });
+    await mailer.sendAppointmentReminder('patient@clinic-mail.ph', appointment);
+    for (const call of send.mock.calls) {
+      const raw = Buffer.from(call[0].requestBody.raw, 'base64url').toString('utf8');
+      expect(raw).toContain('9:20 AM'); expect(raw).toContain('20 minutes'); expect(raw).toContain('No-show');
+    }
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('clearly describes cancellation and availability disruption without claiming confirmation', async () => {
+    for (const kind of ['cancelled', 'disrupted'] as const) {
+      await new MailerService().sendAppointmentChange('patient@clinic-mail.ph', {
+        kind, clinicName: 'Clinic', clinicAddress: '', date: '2026-10-21',
+        startTime: '09:00', endTime: '09:30', changedAt: new Date('2026-10-20T00:00:00Z'),
+      });
+      const raw = Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8');
+      expect(raw).toContain(kind === 'cancelled' ? 'has been cancelled' : 'needs a new schedule');
+      expect(raw).not.toContain('has been declined');
+    }
+  });
+
   it('emails the previous and new reschedule with pending-confirmation status and escaped patient-facing reason', async () => {
     send.mockResolvedValue({});
     await new MailerService().sendAppointmentChange('patient@clinic-mail.ph', {

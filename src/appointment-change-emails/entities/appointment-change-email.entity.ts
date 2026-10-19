@@ -1,6 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, Types } from 'mongoose';
 
+export type AppointmentEmailKind = 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled' | 'disrupted';
+
 @Schema({ _id: false })
 export class AppointmentEmailSchedule {
   @Prop({ required: true }) date: string;
@@ -15,7 +17,8 @@ export class AppointmentChangeEmail {
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Appointment', required: true }) appointment: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'User', required: true }) patient: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Clinic', required: true }) clinic: Types.ObjectId;
-  @Prop({ enum: ['rescheduled', 'rejected'], required: true }) kind: 'rescheduled' | 'rejected';
+  @Prop({ enum: ['confirmed', 'rescheduled', 'rejected', 'cancelled', 'disrupted'], required: true }) kind: AppointmentEmailKind;
+  @Prop() eventKey?: string;
   @Prop({ type: AppointmentEmailSchedule, required: true }) schedule: AppointmentEmailSchedule;
   @Prop({ type: AppointmentEmailSchedule }) previousSchedule?: AppointmentEmailSchedule;
   @Prop({ maxlength: 500 }) reason?: string;
@@ -27,3 +30,4 @@ export class AppointmentChangeEmail {
 }
 export const AppointmentChangeEmailSchema = SchemaFactory.createForClass(AppointmentChangeEmail);
 AppointmentChangeEmailSchema.index({ sentAt: 1, skippedAt: 1, lockedUntil: 1, createdAt: 1 });
+AppointmentChangeEmailSchema.index({ eventKey: 1 }, { unique: true, sparse: true });

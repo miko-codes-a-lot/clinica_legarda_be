@@ -8,6 +8,8 @@ import { MailerService } from '../mailer/mailer.service';
 import { AppointmentChangeEmail } from './entities/appointment-change-email.entity';
 import { randomUUID } from 'crypto';
 import { isEmailRecipient } from '../mailer/email-recipient';
+import { Appointment } from '../appointments/entities/appointment.entity';
+import { reservationDeadline } from '../appointments/appointment-time';
 
 @Injectable()
 export class AppointmentChangeEmailsService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -20,6 +22,7 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
     @InjectModel(Clinic.name) private readonly clinics: Model<Clinic>,
     private readonly mailer: MailerService,
     private readonly config: ConfigService,
+    @InjectModel(Appointment.name) private readonly appointments: Model<Appointment>,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -51,6 +54,19 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
       if (!claimed) continue;
       const claim = { _id: claimed._id, leaseToken };
       try {
+        if (['confirmed', 'rescheduled', 'disrupted'].includes(claimed.kind)) {
+          const current = await this.appointments.findById(claimed.appointment).exec();
+          const valid = current && current.date.toISOString().slice(0, 10) === claimed.schedule.date &&
+            current.startTime === claimed.schedule.startTime && current.endTime === claimed.schedule.endTime &&
+            current.patient.toString() === claimed.patient.toString() && current.clinic.toString() === claimed.clinic.toString() &&
+            (claimed.kind === 'confirmed' ? current.status === 'confirmed' && !current.disruption &&
+              reservationDeadline(current.date, current.startTime).getTime() > Date.now()
+              : claimed.kind === 'rescheduled' ? current.status === 'pending' : !!current.disruption && ['pending', 'confirmed'].includes(current.status));
+          if (!valid) {
+            await this.outbox.updateOne(claim, { $set: { skippedAt: new Date() }, $unset: { leaseToken: 1, lockedUntil: 1 } }).exec();
+            continue;
+          }
+        }
         const [patient, clinic] = await Promise.all([
           this.users.findById(claimed.patient).select('emailAddress').exec(),
           this.clinics.findById(claimed.clinic).select('name address').exec(),
@@ -62,6 +78,7 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
         await this.mailer.sendAppointmentChange(patient.emailAddress, {
           kind: claimed.kind, clinicName: clinic.name, clinicAddress: clinic.address || '',
           date: claimed.schedule.date, startTime: claimed.schedule.startTime, endTime: claimed.schedule.endTime,
+          ...(claimed.kind === 'confirmed' ? { arrivalDeadline: reservationDeadline(new Date(claimed.schedule.date), claimed.schedule.startTime) } : {}),
           ...(claimed.previousSchedule ? { previousSchedule: {
             date: claimed.previousSchedule.date, startTime: claimed.previousSchedule.startTime, endTime: claimed.previousSchedule.endTime,
           } } : {}), reason: claimed.reason, changedAt: claimed.createdAt,

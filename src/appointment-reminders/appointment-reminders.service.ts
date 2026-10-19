@@ -10,6 +10,7 @@ import { AppointmentReminder } from './entities/appointment-reminder.entity';
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
 import { Clinic } from '../clinics/entities/clinic.entity';
 import { User } from '../users/entities/user.entity';
+import { appointmentStart, reservationDeadline } from '../appointments/appointment-time';
 
 const DAY = 86_400_000;
 const MANILA_OFFSET = 8 * 60 * 60 * 1000;
@@ -21,9 +22,8 @@ type PopulatedAppointment = Omit<Appointment, 'patient' | 'clinic'> & {
 };
 
 function startsAt(appointment: Pick<Appointment, 'date' | 'startTime'>): number {
-  if (!appointment.date || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(appointment.startTime)) return NaN;
-  const [hours, minutes] = appointment.startTime.split(':').map(Number);
-  return Date.UTC(appointment.date.getUTCFullYear(), appointment.date.getUTCMonth(), appointment.date.getUTCDate(), hours, minutes) - MANILA_OFFSET;
+  try { return appointmentStart(appointment.date, appointment.startTime).getTime(); }
+  catch { return NaN; }
 }
 
 function due(appointment: PopulatedAppointment, now: number): boolean {
@@ -119,6 +119,7 @@ export class AppointmentRemindersService implements OnApplicationBootstrap, OnMo
       await this.mailer.sendAppointmentReminder(current.patient.emailAddress, {
         clinicName: current.clinic.name, clinicAddress: current.clinic.address || '',
         date: current.date.toISOString().slice(0, 10), startTime: current.startTime, endTime: current.endTime,
+        arrivalDeadline: reservationDeadline(current.date, current.startTime),
       });
       await this.reminders.updateOne(claim, { $set: { sentAt: new Date() }, $unset: { lockedUntil: 1, leaseToken: 1 } }).exec();
     } catch {

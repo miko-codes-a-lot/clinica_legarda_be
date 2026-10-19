@@ -10,6 +10,7 @@ import { NotificationType } from './entities/notification.entity';
 import { AppointmentStatus } from 'src/_shared/enum/appointment-status.enum';
 import { UsersService } from 'src/users/users.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
+import { reservationDeadline } from '../appointments/appointment-time';
 
 @Injectable()
 export class NotificationListenerService implements OnModuleInit {
@@ -161,7 +162,7 @@ export class NotificationListenerService implements OnModuleInit {
         dentistMessage = `The appointment for ${patientName} has been rejected.`;
         break;
       case AppointmentStatus.CONFIRMED:
-        patientMessage = `Your appointment with Dr. ${dentistName} has been confirmed.`;
+        patientMessage = `Your appointment with Dr. ${dentistName} has been confirmed. Check in by ${new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(reservationDeadline(appointment.date, appointment.startTime))} (Philippine time), 20 minutes after the start, to avoid No-show.`;
         dentistMessage = `The appointment for ${patientName} has been confirmed.`;
         // adminMessage = `Dr. ${dentistName} confirmed the appointment for ${patientName}.`;
         break;

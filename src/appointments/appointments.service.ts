@@ -502,8 +502,8 @@ export class AppointmentsService {
         },
         session,
       );
-      if (status === AppointmentStatus.REJECTED) {
-        await this.queueChangeEmail(current, 'rejected', this.emailSchedule(current), actor, session, reason);
+      if ([AppointmentStatus.CONFIRMED, AppointmentStatus.REJECTED, AppointmentStatus.CANCELLED].includes(status)) {
+        await this.queueChangeEmail(current, status as 'confirmed' | 'rejected' | 'cancelled', this.emailSchedule(current), actor, session, reason);
       }
     });
     return this.findOne(id, actor);
@@ -521,11 +521,12 @@ export class AppointmentsService {
     return { date: appointment.date.toISOString().slice(0, 10), startTime: appointment.startTime, endTime: appointment.endTime };
   }
 
-  private async queueChangeEmail(current: AppointmentDocument, kind: 'rescheduled' | 'rejected',
+  private async queueChangeEmail(current: AppointmentDocument, kind: 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled',
     schedule: { date: string; startTime: string; endTime: string }, actor: UserActor, session: ClientSession, reason?: string,
     target?: { patient: string; clinic: string }) {
-    if (actor.role === 'user' || !this.changeEmailOutbox) return;
+    if ((actor.role === 'user' && kind !== 'cancelled') || !this.changeEmailOutbox) return;
     await this.changeEmailOutbox.create([{
+      eventKey: `${current._id.toString()}:${current.history.length + 1}:${kind}`,
       appointment: current._id, patient: new Types.ObjectId(target?.patient ?? referenceId(current.patient)),
       clinic: new Types.ObjectId(target?.clinic ?? referenceId(current.clinic)), kind, schedule,
       ...(kind === 'rescheduled' && (!target || sameId(current.patient, target.patient)) ? { previousSchedule: this.emailSchedule(current) } : {}), reason: reason?.trim(),

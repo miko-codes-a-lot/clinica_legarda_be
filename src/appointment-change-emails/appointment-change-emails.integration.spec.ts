@@ -24,7 +24,7 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
   let fixture: { patient: string; dentist: string; clinic: string; service: string };
   const send = jest.fn<Promise<void>, Parameters<MailerService['sendAppointmentChange']>>();
   const worker = () => new AppointmentChangeEmailsService(outbox, users, clinics,
-    { sendAppointmentChange: send } as unknown as MailerService, new ConfigService());
+    { sendAppointmentChange: send } as unknown as MailerService, new ConfigService(), appointments);
   const actor = () => ({ sub: fixture.dentist, role: 'dentist', username: 'Doctor' });
   const reschedule = { date: new Date('2026-10-20'), startTime: '11:00', endTime: '11:30', reason: 'Clinic schedule changed' };
   const book = () => appointments.create({ ...fixture, services: [fixture.service], date: new Date('2026-10-19'),
@@ -78,6 +78,50 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     expect(await outbox.countDocuments()).toBe(1);
     await worker().sendPending();
     expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({ kind: 'rejected', reason: 'Dentist unavailable' }));
+  });
+
+  it('persists approval mail once for a committed transition and supplies its arrival deadline', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
+    const appointment = await book();
+    await service.approve(appointment.id, actor());
+    await expect(service.approve(appointment.id, actor())).rejects.toThrow();
+    expect(await outbox.countDocuments()).toBe(1);
+    await worker().sendPending();
+    expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({
+      kind: 'confirmed', arrivalDeadline: new Date('2026-10-19T01:50:00Z'),
+    }));
+    expect(JSON.stringify(await outbox.findOne())).not.toContain('CLINICAL');
+  });
+
+  it('notifies a patient of their own cancellation and does not repeat it', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
+    const appointment = await book();
+    // The production create path persists the creator; this raw fixture must do so too.
+    await appointments.collection.updateOne({ _id: appointment._id }, { $set: { createdBy: appointment.patient } });
+    await service.cancel(appointment.id, { sub: fixture.patient, role: 'user' }, 'Family emergency');
+    await expect(service.cancel(appointment.id, { sub: fixture.patient, role: 'user' }, 'Again')).rejects.toThrow();
+    expect(await outbox.countDocuments()).toBe(1);
+    await worker().sendPending();
+    expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({ kind: 'cancelled', reason: 'Family emergency' }));
+  });
+
+  it.each(['cancelled', 'rescheduled'])('suppresses an approval after the appointment was %s', async (change) => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
+    const appointment = await book();
+    await service.approve(appointment.id, actor());
+    await appointments.updateOne({ _id: appointment._id }, change === 'cancelled'
+      ? { status: 'cancelled' } : { date: reschedule.date, startTime: reschedule.startTime, endTime: reschedule.endTime });
+    await worker().sendPending();
+    expect(send).not.toHaveBeenCalled();
+    expect(await outbox.countDocuments({ skippedAt: { $exists: true } })).toBe(1);
+  });
+
+  it('rolls approval and its history back when its outbox write fails', async () => {
+    const appointment = await book();
+    jest.spyOn(outbox, 'create').mockRejectedValueOnce(new Error('Outbox unavailable'));
+    await expect(service.approve(appointment.id, actor())).rejects.toThrow('Outbox unavailable');
+    const current = await appointments.findById(appointment._id);
+    expect(current?.status).toBe('pending'); expect(current?.history).toHaveLength(0);
   });
 
   it('does not enqueue patient self-reschedules', async () => {

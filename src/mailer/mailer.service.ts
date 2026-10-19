@@ -3,6 +3,8 @@ import { google } from 'googleapis';
 import configuration from 'src/_shared/configuration';
 import { CLINIC_NAME } from '../_shared/clinic-brand';
 import { isEmailRecipient } from './email-recipient';
+import { reservationDeadline } from '../appointments/appointment-time';
+import { AppointmentEmailKind } from '../appointment-change-emails/entities/appointment-change-email.entity';
 
 export interface AppointmentReminderEmail {
   clinicName: string;
@@ -10,10 +12,11 @@ export interface AppointmentReminderEmail {
   date: string;
   startTime: string;
   endTime: string;
+  arrivalDeadline?: Date;
 }
 
 export interface AppointmentChangeMessage extends AppointmentReminderEmail {
-  kind: 'rescheduled' | 'rejected';
+  kind: AppointmentEmailKind;
   previousSchedule?: Pick<AppointmentReminderEmail, 'date' | 'startTime' | 'endTime'>;
   reason?: string;
   changedAt: Date;
@@ -64,20 +67,27 @@ export class MailerService {
     const schedule = (value: Pick<AppointmentReminderEmail, 'date' | 'startTime' | 'endTime'>) =>
       `${date(value.date)} · ${time(value.startTime)} – ${time(value.endTime)} (Philippine time)`;
     const rescheduled = change.kind === 'rescheduled';
-    const heading = rescheduled ? 'Your appointment was rescheduled' : 'Your appointment request was declined';
+    const copy: Record<AppointmentEmailKind, { heading: string; subject: string; message: string }> = {
+      confirmed: { heading: 'Your appointment is confirmed', subject: 'Appointment confirmed', message: 'The clinic has confirmed your appointment.' },
+      rescheduled: { heading: 'Your appointment was rescheduled', subject: 'Appointment rescheduled', message: 'Clinic staff rescheduled your appointment. The revised appointment is pending confirmation.' },
+      rejected: { heading: 'Your appointment request was declined', subject: 'Appointment declined', message: 'Your appointment request has been declined. Please contact the clinic to discuss another schedule.' },
+      cancelled: { heading: 'Your appointment was cancelled', subject: 'Appointment cancelled', message: 'Your appointment has been cancelled. This time is no longer reserved for you.' },
+      disrupted: { heading: 'Your appointment needs a new schedule', subject: 'Appointment schedule needs attention', message: 'Dentist or clinic availability has changed. Your appointment needs a new schedule. Please contact the clinic; your existing appointment has not been automatically moved or cancelled.' },
+    };
+    const { heading, subject, message } = copy[change.kind];
     const changed = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' }).format(change.changedAt);
     const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172a2a;line-height:1.6">
       <h1>${heading}</h1><p>This update was made on ${changed} (Philippine time).</p>
-      <p>${rescheduled ? 'Clinic staff rescheduled your appointment. The revised appointment is pending confirmation.' : 'Your appointment request has been declined. Please contact the clinic to discuss another schedule.'}</p>
+      <p>${message}</p>
       <table cellpadding="8" style="border-collapse:collapse;text-align:left">
         <tr><th>Clinic</th><td>${escape(change.clinicName)}</td></tr>
         ${change.clinicAddress ? `<tr><th>Address</th><td>${escape(change.clinicAddress)}</td></tr>` : ''}
         ${rescheduled && change.previousSchedule ? `<tr><th>Previous schedule</th><td>${schedule(change.previousSchedule)}</td></tr>` : ''}
-        <tr><th>${rescheduled ? 'Revised schedule' : 'Requested schedule'}</th><td>${schedule(change)}</td></tr>
+        <tr><th>${rescheduled ? 'Revised schedule' : 'Appointment schedule'}</th><td>${schedule(change)}</td></tr>
         ${change.reason ? `<tr><th>Reason</th><td>${escape(change.reason)}</td></tr>` : ''}
-      </table><p>Sign in to your patient account for the latest appointment status, or contact the clinic for help.</p>
+      </table>${change.kind === 'confirmed' ? this.arrivalNotice(change) : ''}<p>Sign in to your patient account for the latest appointment status, or contact the clinic for help.</p>
       <p>${escape(CLINIC_NAME)}</p></body></html>`;
-    const raw = this.buildRawMessage(configuration().gmail.from!, to, `${rescheduled ? 'Appointment rescheduled' : 'Appointment declined'} - ${CLINIC_NAME}`, html);
+    const raw = this.buildRawMessage(configuration().gmail.from!, to, `${subject} - ${CLINIC_NAME}`, html);
     const gmail = google.gmail({ version: 'v1', auth: this.oAuth2Client });
     await gmail.users.messages.send({ userId: 'me', requestBody: { raw } }, { timeout: 30_000, retry: false });
   }
@@ -103,12 +113,19 @@ export class MailerService {
         <tr><th>Clinic</th><td>${escape(appointment.clinicName)}</td></tr>
         ${appointment.clinicAddress ? `<tr><th>Address</th><td>${escape(appointment.clinicAddress)}</td></tr>` : ''}
       </table>
+      ${this.arrivalNotice(appointment)}
       <p>Please sign in to your patient account to review, reschedule, or cancel your appointment.</p>
       <p>${escape(CLINIC_NAME)}</p>
     </body></html>`;
     const rawMessage = this.buildRawMessage(configuration().gmail.from!, to, `Appointment reminder - ${CLINIC_NAME}`, html);
     const gmail = google.gmail({ version: 'v1', auth: this.oAuth2Client });
     await gmail.users.messages.send({ userId: 'me', requestBody: { raw: rawMessage } }, { timeout: 30_000, retry: false });
+  }
+
+  private arrivalNotice(appointment: AppointmentReminderEmail): string {
+    const deadline = reservationDeadline(new Date(appointment.date), appointment.startTime);
+    const label = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', dateStyle: 'long', timeStyle: 'short' }).format(deadline);
+    return `<p>Please check in by <strong>${label} (Philippine time)</strong>, 20 minutes after your appointment starts. If you have not checked in by then, the appointment will be marked No-show. Contact the clinic if you need help.</p>`;
   }
 
   async sendOtp(to: string, code: string): Promise<void> {

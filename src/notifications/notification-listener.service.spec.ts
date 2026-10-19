@@ -48,4 +48,13 @@ describe('Appointment change notifications', () => {
     ]));
   });
 
+  it('includes the Manila check-in deadline on confirmation', async () => {
+    appointment.status = 'confirmed';
+    onChange({ operationType: 'update', documentKey: { _id: 'appointment-1' }, updateDescription: { updatedFields: { status: 'confirmed' } } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(createMany).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ recipient: 'patient-1', message: expect.stringContaining('11:20 AM') }),
+    ]));
+  });
+
 });
