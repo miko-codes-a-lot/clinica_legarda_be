@@ -7,6 +7,7 @@ import { reservationDeadline } from '../appointments/appointment-time';
 import { AppointmentEmailKind } from '../appointment-change-emails/entities/appointment-change-email.entity';
 
 export interface AppointmentReminderEmail {
+  patientName?: string;
   clinicName: string;
   clinicAddress: string;
   date: string;
@@ -80,6 +81,7 @@ export class MailerService {
       <h1>${heading}</h1><p>This update was made on ${changed} (Philippine time).</p>
       <p>${message}</p>
       <table cellpadding="8" style="border-collapse:collapse;text-align:left">
+        ${change.patientName ? `<tr><th>Patient</th><td>${escape(change.patientName)}</td></tr>` : ''}
         <tr><th>Clinic</th><td>${escape(change.clinicName)}</td></tr>
         ${change.clinicAddress ? `<tr><th>Address</th><td>${escape(change.clinicAddress)}</td></tr>` : ''}
         ${rescheduled && change.previousSchedule ? `<tr><th>Previous schedule</th><td>${schedule(change.previousSchedule)}</td></tr>` : ''}
@@ -108,6 +110,7 @@ export class MailerService {
       <h1>Your upcoming dental appointment</h1>
       <p>This is a reminder of your confirmed appointment at ${escape(appointment.clinicName)}.</p>
       <table cellpadding="8" style="border-collapse:collapse;text-align:left">
+        ${appointment.patientName ? `<tr><th>Patient</th><td>${escape(appointment.patientName)}</td></tr>` : ''}
         <tr><th>Date</th><td>${date}</td></tr>
         <tr><th>Time</th><td>${time(appointment.startTime)} – ${time(appointment.endTime)} (Philippine time)</td></tr>
         <tr><th>Clinic</th><td>${escape(appointment.clinicName)}</td></tr>

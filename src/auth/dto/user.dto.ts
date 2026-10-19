@@ -4,6 +4,7 @@ export class UserDto {
   role: string;
   clinic?: string;
   clinics?: string[];
+  patientIds?: readonly string[];
   otpPending?: boolean;
   iat: number;
   exp: number;

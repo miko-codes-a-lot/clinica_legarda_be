@@ -1,3 +1,4 @@
+import { DependentsService } from '../dependents/dependents.service';
 import { createConnection, Connection, Model } from 'mongoose';
 import { PatientRecordChange, PatientRecordChangeSchema, PatientRecordAuditState, PatientRecordAuditStateSchema } from './entities/patient-record-change.entity';
 import { PatientRecordChangesService } from './patient-record-changes.service';
@@ -48,6 +49,17 @@ const uri = process.env.CLINICA_PANELIST_TEST_URI;
   afterEach(() => jest.restoreAllMocks());
   afterAll(async () => { await db?.dropDatabase(); await db?.close(); });
 
+  it('audits child detail edits without counting omitted contact fields as changes', async () => {
+    await users.updateOne({ _id: f.patient }, { $set: { otpVerifiedAt: new Date() } });
+    const service = new DependentsService(users, appointments, visits, audit);
+    const parent = { sub: f.patient, role: 'user' };
+    const child = await service.create(parent, { firstName: 'Alice', lastName: 'Patient', birthDate: '2018-02-28' });
+    await users.updateOne({ _id: child._id }, { $set: { clinics: [f.clinic], address: 'Retained address' } });
+    await service.update(parent, String(child._id), { firstName: 'Alicia', lastName: 'Patient', birthDate: '2018-02-28' });
+    await service.update(parent, String(child._id), { firstName: 'Alicia', lastName: 'Patient', birthDate: '2018-02-28' });
+    expect(await changes.countDocuments()).toBe(1); expect((await changes.findOne())?.fields).toEqual(['firstName']);
+    expect((await reports.getReport(f.clinic, actor(), { period: 'month', anchor: '2026-10-20' })).patientRecordChanges.events).toBe(1);
+  });
   it('saves and clears optional details, audits real edits and preserves access boundaries', async () => {
     const details = { birthDate: '2000-02-29', sex: ' Female ', occupation: ' Student ', religion: '', maritalStatus: ' Single ' };
     await profiles.upsert({ ...profile(), ...details }, f.patient, actor());

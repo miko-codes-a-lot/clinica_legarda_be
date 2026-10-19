@@ -1,3 +1,4 @@
+import { patientRecipient, PatientRecipientSource, PATIENT_RECIPIENT_FIELDS, GUARDIAN_RECIPIENT_FIELDS } from '../users/patient-recipient';
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -15,7 +16,7 @@ import { appointmentStart, reservationDeadline } from '../appointments/appointme
 const DAY = 86_400_000;
 const MANILA_OFFSET = 8 * 60 * 60 * 1000;
 const RETRY_DELAY = 10 * 60 * 1000;
-type Recipient = Pick<User, 'emailAddress'> & { _id: Types.ObjectId };
+type Recipient = PatientRecipientSource;
 type Location = Pick<Clinic, 'name' | 'address'> & { _id: Types.ObjectId };
 type PopulatedAppointment = Omit<Appointment, 'patient' | 'clinic'> & {
   _id: Types.ObjectId; patient: Recipient | null; clinic: Location | null;
@@ -30,7 +31,7 @@ function due(appointment: PopulatedAppointment, now: number): boolean {
   const start = startsAt(appointment);
   return appointment.status === AppointmentStatus.CONFIRMED && !appointment.disruption &&
     start > now && start <= now + DAY && !!appointment.clinic &&
-    isEmailRecipient(appointment.patient?.emailAddress);
+    isEmailRecipient(patientRecipient(appointment.patient)?.emailAddress);
 }
 
 @Injectable()
@@ -75,7 +76,7 @@ export class AppointmentRemindersService implements OnApplicationBootstrap, OnMo
       date: { $gte: day, $lt: new Date(day.getTime() + 2 * DAY) },
       disruption: { $exists: false },
     }).select('date startTime endTime status patient clinic disruption')
-      .populate<{ patient: Recipient | null }>('patient', 'emailAddress')
+      .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
       .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
     for (const appointment of candidates) {
       if (due(appointment, Date.now())) await this.deliver(appointment);
@@ -110,13 +111,16 @@ export class AppointmentRemindersService implements OnApplicationBootstrap, OnMo
         endTime: appointment.endTime, patient: appointment.patient?._id, clinic: appointment.clinic?._id,
         status: AppointmentStatus.CONFIRMED, disruption: { $exists: false },
       }).select('date startTime endTime status patient clinic disruption')
-        .populate<{ patient: Recipient | null }>('patient', 'emailAddress')
+        .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
         .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
       if (!current || !due(current, Date.now()) || !current.patient || !current.clinic) {
         await this.reminders.deleteOne(claim).exec();
         return;
       }
-      await this.mailer.sendAppointmentReminder(current.patient.emailAddress, {
+      const recipient = patientRecipient(current.patient);
+      if (!recipient?.emailAddress) { await this.reminders.deleteOne(claim).exec(); return; }
+      await this.mailer.sendAppointmentReminder(recipient.emailAddress, {
+        patientName: recipient.patientName,
         clinicName: current.clinic.name, clinicAddress: current.clinic.address || '',
         date: current.date.toISOString().slice(0, 10), startTime: current.startTime, endTime: current.endTime,
         arrivalDeadline: reservationDeadline(current.date, current.startTime),

@@ -87,6 +87,18 @@ export class User {
   status: UserStatus;
 
   @Prop({ default: false })
+  isDependent?: boolean;
+
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true })
+  guardian?: mongoose.Types.ObjectId;
+
+  @Prop({ default: true })
+  loginEnabled?: boolean;
+
+  @Prop({ enum: ['email', 'guardian'] })
+  verificationSource?: 'email' | 'guardian';
+
+  @Prop({ default: false })
   isWalkIn: boolean;
 
   // DAILY CAPACITY

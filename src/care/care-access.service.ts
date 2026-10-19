@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, FilterQuery, Model } from 'mongoose';
-import { UserActor } from '../auth/role-policy';
+import { actorPatientIds, UserActor } from '../auth/role-policy';
 import { referenceId } from '../auth/reference-id';
 import { User } from '../users/entities/user.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
@@ -9,7 +9,7 @@ import { clinicMembershipFilter } from '../users/clinic-membership';
 import { careScope, requireCareClinic, requireCareStaff } from './care-policy';
 import { Visit } from './entities/visit.entity';
 
-export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address birthDate sex occupation religion maritalStatus';
+export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address birthDate sex occupation religion maritalStatus isDependent loginEnabled verificationSource guardian';
 export const CARE_CLINIC_FIELDS = '_id name address mobileNumber';
 export const CARE_CLINICIAN_FIELDS = '_id firstName middleName lastName';
 
@@ -25,7 +25,7 @@ export class CareAccessService {
   requireClinic(actor: UserActor, clinic: string): void { requireCareClinic(actor, clinic); }
 
   async patientFilter(actor: UserActor, clinic?: string, session?: ClientSession): Promise<FilterQuery<User>> {
-    if (actor.role === 'user') return { role: 'user', _id: referenceId(actor.sub) };
+    if (actor.role === 'user') return { role: 'user', _id: { $in: actorPatientIds(actor).map(referenceId) } };
     requireCareStaff(actor);
     if (actor.role === 'super-admin' && !clinic) return { role: 'user' };
     const scope = careScope(actor, clinic);

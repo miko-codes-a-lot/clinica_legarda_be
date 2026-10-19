@@ -83,7 +83,7 @@ describe('OTP email identity', () => {
   it('emails the previous and new reschedule with pending-confirmation status and escaped patient-facing reason', async () => {
     send.mockResolvedValue({});
     await new MailerService().sendAppointmentChange('patient@clinic-mail.ph', {
-      kind: 'rescheduled', clinicName: 'Clinic & Branch', clinicAddress: 'Test address', date: '2026-10-20', startTime: '11:00', endTime: '11:30',
+      kind: 'rescheduled', patientName: '<b>Alice Child</b>', clinicName: 'Clinic & Branch', clinicAddress: 'Test address', date: '2026-10-20', startTime: '11:00', endTime: '11:30',
       previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' }, reason: '<script>Moved</script>', changedAt: new Date('2026-10-13T00:00:00Z'),
     });
     expect(send).toHaveBeenCalledTimes(1);
@@ -91,6 +91,7 @@ describe('OTP email identity', () => {
     expect(raw).toContain('October 19, 2026'); expect(raw).toContain('October 20, 2026');
     expect(raw).toContain('9:30 AM'); expect(raw).toContain('11:00 AM');
     expect(raw).toContain('pending confirmation'); expect(raw).toContain('Philippine time');
+    expect(raw).toContain('&lt;b&gt;Alice Child&lt;/b&gt;'); expect(raw).not.toContain('<b>Alice Child</b>');
     expect(raw).toContain('&lt;script&gt;Moved&lt;/script&gt;'); expect(raw).not.toContain('<script>');
   });
 

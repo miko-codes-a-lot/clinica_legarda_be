@@ -474,7 +474,7 @@ localTests('Record access boundaries', () => {
     ).toEqual([['_id', 'role']]);
   });
 
-  it('validates referral source against patient history and derives patient despite forged context', async () => {
+  it('validates referral source and rejects patient identities outside current management', async () => {
     await expect(
       referralService.upsert(
         source({ fromDoctorId: fixture.otherDentist }),
@@ -496,9 +496,10 @@ localTests('Record access boundaries', () => {
         actor('dentist'),
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(referralService.upsert(source({ patient: fixture.otherPatient }), undefined, actor('user'))).rejects.toBeInstanceOf(ForbiddenException);
     const created = await referralService.upsert(
       source({
-        patient: fixture.otherPatient,
+        patient: fixture.patient,
         status: 'confirmed',
         appointment: fixture.otherAppointment,
       }),

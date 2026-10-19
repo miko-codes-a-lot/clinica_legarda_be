@@ -4,4 +4,4 @@ export const DENTIST_DIRECTORY_FIELDS =
 export const PATIENT_DIRECTORY_FIELDS =
   '_id firstName middleName lastName role status';
 export const APPOINTMENT_PERSON_FIELDS =
-  '_id firstName middleName lastName role status profilePicture';
+  '_id firstName middleName lastName role status profilePicture isDependent verificationSource';

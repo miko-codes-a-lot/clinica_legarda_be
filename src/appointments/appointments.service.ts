@@ -73,7 +73,7 @@ export class AppointmentsService {
     }
     const request = this.writeFields(dto, actor);
     const id = await this.scheduling.withLocks(
-      [request.dentist, request.patient],
+      [request.dentist, request.patient, ...(actor.role === 'user' ? [actor.sub] : [])],
       async (session) => {
         await this.requireBookablePatient(request.patient, actor, session);
         const validated = await this.scheduling.validate(request, session);
@@ -170,8 +170,13 @@ export class AppointmentsService {
   }
 
   private async authorizePatient(actor: UserActor, patient: string, session?: ClientSession) {
-    if (actor.role !== 'admin') return;
     const id = referenceId(patient);
+    if (actor.role === 'user' && !sameId(id, actor.sub)) {
+      const child = await this.userModel.exists({ _id: id, role: 'user', isDependent: true, loginEnabled: false, guardian: referenceId(actor.sub) }).session(session ?? null);
+      const parent = await this.userModel.exists({ _id: referenceId(actor.sub), role: 'user', status: 'confirmed', otpVerifiedAt: { $type: 'date' }, loginEnabled: { $ne: false }, isDependent: { $ne: true } }).session(session ?? null);
+      if (!child || !parent) throw new ForbiddenException('This child is not currently managed by your verified parent account.');
+    }
+    if (actor.role !== 'admin') return;
     const member = await this.userModel.exists({ _id: id, role: 'user', ...clinicMembershipFilter(adminClinicIds(actor)) }).session(session ?? null);
     const history = member || await this.appointmentModel.exists({ patient: id, ...adminClinicScope(actor) }).session(session ?? null)
       || (this.visits && await this.visits.exists({ patient: id, ...adminClinicScope(actor) }).session(session ?? null));
@@ -179,6 +184,7 @@ export class AppointmentsService {
   }
 
   private async requireBookablePatient(patient: string, actor: UserActor, session: ClientSession) {
+    await this.authorizePatient(actor, patient, session);
     const eligible = await this.userModel.exists({
       _id: referenceId(patient), role: 'user', status: { $in: patientBookingStatuses(actor.role) },
     }).session(session);
@@ -588,7 +594,7 @@ export class AppointmentsService {
       ...(careCase ? { careCase: referenceId(careCase) } : {}),
       isWalkIn: clinical ? dto.isWalkIn ?? current?.isWalkIn ?? false : current?.isWalkIn ?? false,
       clinic: dto.clinic,
-      patient: actor.role === 'user' ? referenceId(actor.sub) : dto.patient,
+      patient: referenceId(dto.patient),
       dentist: dto.dentist,
       services:
         dto.services ?? (current ? this.scheduleRequest(current).services : []),
@@ -689,7 +695,7 @@ export class AppointmentsService {
     authorize(snapshot);
     const before = this.scheduleRequest(snapshot);
     return this.scheduling.withLocks(
-      [before.dentist, before.patient, ...proposedUserIds],
+      [before.dentist, before.patient, ...proposedUserIds, ...(actor.role === 'user' ? [actor.sub] : [])],
       async (session) => {
         const current = await this.appointmentModel
           .findById(id)
@@ -698,6 +704,7 @@ export class AppointmentsService {
         if (!current)
           throw new NotFoundException(`Appointment with ID "${id}" not found.`);
         authorize(current);
+        await this.authorizePatient(actor, referenceId(current.patient), session);
         const after = this.scheduleRequest(current);
         if (
           before.dentist !== after.dentist ||

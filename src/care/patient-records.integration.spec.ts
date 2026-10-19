@@ -108,7 +108,8 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     expect(result.body.cases[0].plan).toBe('Public case plan'); expect(result.body.appointments).toHaveLength(1);
     expect(JSON.stringify(result.body)).not.toMatch(/PRIVATE_|OTHER_PATIENT|assessment|internalNotes|clinicalAuthor|events|actor|createdBy|password/);
     await get('/care/my-record', fixture.admin).expect(403);
-    expect((await get(`/care/my-record?patient=${fixture.patient}`, fixture.outsidePatient).expect(200)).body.visits[0].summary).toBe('OTHER_PATIENT_SUMMARY');
+    await get(`/care/my-record?patient=${fixture.patient}`, fixture.outsidePatient).expect(403);
+    expect((await get('/care/my-record', fixture.outsidePatient).expect(200)).body.visits[0].summary).toBe('OTHER_PATIENT_SUMMARY');
   });
   it('requires authentication and rejects patients from staff records', async () => {
     await get('/care/patients').expect(401);

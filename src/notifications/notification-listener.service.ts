@@ -87,10 +87,11 @@ export class NotificationListenerService implements OnModuleInit {
     // Prepare an array of all notifications to be created
     const notificationsToCreate: CreateNotificationDto[] = [];
 
-    // 1. Add patient notification to the list
-    notificationsToCreate.push({
-      recipient: appointment.patient._id.toString(),
-      message: `Your appointment with Dr. ${dentistName} has been booked and is pending confirmation.`,
+    const recipient = await this.userService.notificationPatientRecipient(populatedAppointment.patient._id);
+    // Child notices go only to the current verified parent.
+    if (recipient) notificationsToCreate.push({
+      recipient: recipient.id,
+      message: `${recipient.patientName ? recipient.patientName + ": " : ""}Your appointment with Dr. ${dentistName} has been booked and is pending confirmation.`,
       type: NotificationType.APPOINTMENT_CREATED,
       link: '/app/my-appointment',
       appointment: appointment._id.toString(),
@@ -181,10 +182,11 @@ export class NotificationListenerService implements OnModuleInit {
         break;
     }
 
-    if (patientMessage) {
+    const recipient = await this.userService.notificationPatientRecipient(appointment.patient._id);
+    if (patientMessage && recipient) {
       notificationsToCreate.push({
-        recipient: appointment.patient._id.toString(),
-        message: patientMessage,
+        recipient: recipient.id,
+        message: `${recipient.patientName ? recipient.patientName + ": " : ""}${patientMessage}`,
         type: NotificationType.APPOINTMENT_STATUS_UPDATED,
         link: '/app/my-appointment',
         appointment: appointment._id.toString(),

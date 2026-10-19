@@ -30,12 +30,13 @@ export class AuthService {
 
   async resolveActor(actor: UserActor): Promise<UserActor> {
     const user = await this.userService.findForAuthentication(actor.sub);
-    if (!user) throw new UnauthorizedException('Account is no longer available.');
+    if (!user || user.isDependent || user.loginEnabled === false) throw new UnauthorizedException('Account is no longer available.');
     return {
       sub: referenceId(user._id),
       role: user.role,
       username: user.username,
       clinics: assignedClinicIds(user).map(referenceId),
+      ...(user.role === 'user' ? { patientIds: await this.userService.managedPatientIds(user) } : {}),
     };
   }
 
@@ -128,7 +129,8 @@ export class AuthService {
     return { user, accessToken };
   }
 
-  private requireActivePatient(user: { role: string; status: UserStatus }) {
+  private requireActivePatient(user: { role: string; status: UserStatus; isDependent?: boolean; loginEnabled?: boolean }) {
+    if (user.isDependent || user.loginEnabled === false) throw new BadRequestException('This patient is managed through a parent account.');
     if (user.role === 'user' && user.status === UserStatus.REJECTED) {
       throw new BadRequestException('This patient account is rejected. Contact the clinic.');
     }

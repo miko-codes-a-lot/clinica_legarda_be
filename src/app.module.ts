@@ -1,3 +1,4 @@
+import { DependentsModule } from './dependents/dependents.module';
 import { ClinicClosuresModule } from './clinic-closures/clinic-closures.module';
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
@@ -42,6 +43,7 @@ import { AppointmentNoShowsModule } from './appointment-no-shows/appointment-no-
     EventEmitterModule.forRoot(),
     AuthModule,
     UsersModule,
+    DependentsModule,
     ClinicsModule,
     DentalCatalogModule,
     AppointmentsModule,

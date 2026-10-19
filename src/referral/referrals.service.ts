@@ -1,3 +1,4 @@
+import { actorPatientIds } from '../auth/role-policy';
 import {
   BadRequestException,
   ForbiddenException,
@@ -62,17 +63,13 @@ export class ReferralsService {
     if (actor?.role !== 'dentist' && actor?.role !== 'user')
       throw new ForbiddenException('You cannot access referrals.');
     const linked = await this.appointmentModel.distinct('referral', {
-      [actor.role === 'dentist' ? 'dentist' : 'patient']: referenceId(
-        actor.sub,
-      ),
+      [actor.role === 'dentist' ? 'dentist' : 'patient']: actor.role === 'user' ? { $in: actorPatientIds(actor).map(referenceId) } : referenceId(actor.sub),
     });
     return {
       $or: [
         { _id: { $in: linked } },
         {
-          [actor.role === 'dentist' ? 'fromDoctorId' : 'patient']: referenceId(
-            actor.sub,
-          ),
+          [actor.role === 'dentist' ? 'fromDoctorId' : 'patient']: actor.role === 'user' ? { $in: actorPatientIds(actor).map(referenceId) } : referenceId(actor.sub),
         },
       ],
     };
@@ -103,7 +100,7 @@ export class ReferralsService {
       !decision &&
       actor?.role === 'user' &&
       patient &&
-      sameId(actor.sub, patient)
+      actorPatientIds(actor).some(id => sameId(id, patient))
     )
       return { referral, appointment };
     throw new ForbiddenException('You cannot access this referral.');
@@ -166,10 +163,11 @@ export class ReferralsService {
     }
     const patient =
       actor?.role === 'user'
-        ? referenceId(actor.sub)
+        ? referenceId(doc.patient ?? actor.sub)
         : doc.patient
           ? referenceId(doc.patient)
           : undefined;
+    if (actor?.role === 'user' && !actorPatientIds(actor).map(referenceId).includes(patient ?? '')) throw new ForbiddenException('This patient is not managed by your account.');
     if (!patient)
       throw new BadRequestException('Select a patient for this referral.');
     if (!isAdmin(actor) && actor?.role !== 'user' && actor?.role !== 'dentist')

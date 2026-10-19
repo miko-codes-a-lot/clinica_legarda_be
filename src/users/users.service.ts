@@ -1,3 +1,4 @@
+import { findPatientRecipient } from './patient-recipient';
 import {
   BadRequestException,
   ConflictException,
@@ -43,13 +44,19 @@ export class UsersService {
   }
 
   findForSignIn(username: string) {
-    return this.findByOneUsername(username).select('+password');
+    return this.userModel.findOne({ username, isDependent: { $ne: true }, loginEnabled: { $ne: false } }).populate('clinic clinics').select('+password');
   }
 
   findForResetOtp(emailAddress: string) {
     return this.userModel
-      .findOne({ emailAddress })
+      .findOne({ emailAddress, isDependent: { $ne: true }, loginEnabled: { $ne: false } })
       .select('+password +resetOtp +resetOtpExpires +resetOtpVerified');
+  }
+
+  async managedPatientIds(user: User): Promise<string[]> {
+    const own = referenceId(user._id);
+    if (user.role !== 'user' || user.isDependent || user.loginEnabled === false || user.status !== UserStatus.CONFIRMED || !user.otpVerifiedAt) return [own];
+    return [own, ...(await this.userModel.find({ guardian: own, role: 'user', isDependent: true, loginEnabled: false }).select('_id').lean()).map(child => referenceId(child._id))];
   }
 
   async findAll(actor: UserActor) {
@@ -90,6 +97,8 @@ export class UsersService {
       .find({ role: 'user', ...(patientIds && { _id: { $in: patientIds } }) })
       .select(PATIENT_DIRECTORY_FIELDS);
   }
+
+  notificationPatientRecipient(patient: unknown) { return findPatientRecipient(this.userModel, patient); }
 
   /** Trusted recipient lookup, deliberately unavailable as a directory route. */
   notificationStaffRecipients(clinicId?: string) {
@@ -255,6 +264,7 @@ export class UsersService {
       }
     }
 
+    if (existing?.isDependent && (doc.password || (doc.role !== undefined && doc.role !== 'user') || (doc.status !== undefined && doc.status !== existing.status))) throw new ForbiddenException('Manage this patient through the parent relationship and clinical records.');
     const update = this.profileFields(doc);
     const writeCondition: FilterQuery<User> = {};
     if (!isAdmin(actor)) {
@@ -579,17 +589,20 @@ export class UsersService {
   }
 
   private async requireNoCareHistory(id: string, session: ClientSession, includeAudit = false) {
+    if (await this.userModel.exists({ guardian: id, isDependent: true }).session(session)) throw new ConflictException('Remove or transfer linked child relationships before deleting or changing this parent account.');
+    if (await this.userModel.exists({ _id: id, isDependent: true }).session(session) && await this.appointmentModel.exists({ patient: id }).session(session)) throw new ConflictException('This child has retained appointment records. Keep the patient identity.');
     if (this.visits && await this.visits.exists({ $or: [
       { patient: id }, { dentist: id }, ...(includeAudit ? [{ createdBy: id }, { 'events.actor': id }, { clinicalAuthor: id }] : []),
     ] }).session(session)) throw new ConflictException('This account has retained care history. Keep its identity and role so the records remain accessible.');
   }
 
   async completeEmailVerification(user: User) {
+    if (user.isDependent || user.loginEnabled === false) throw new ForbiddenException('This patient is managed by a parent account.');
     const status = user.role === 'user' && [UserStatus.PENDING, UserStatus.WALK_IN].includes(user.status)
       ? UserStatus.CONFIRMED : user.status;
     const verified = await this.userModel.findOneAndUpdate(
-      { _id: user._id, emailAddress: user.emailAddress, role: user.role, status: user.status },
-      { $set: { otpVerifiedAt: new Date(), status } },
+      { _id: user._id, emailAddress: user.emailAddress, role: user.role, status: user.status, isDependent: { $ne: true }, loginEnabled: { $ne: false } },
+      { $set: { otpVerifiedAt: new Date(), status, verificationSource: 'email' } },
       { new: true },
     ).populate('clinic clinics');
     if (!verified) throw new ConflictException('Account details changed. Sign in again to verify your current email.');

@@ -1,3 +1,4 @@
+import { findPatientRecipient } from '../users/patient-recipient';
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -68,7 +69,7 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
           }
         }
         const [patient, clinic] = await Promise.all([
-          this.users.findById(claimed.patient).select('emailAddress').exec(),
+          findPatientRecipient(this.users, claimed.patient),
           this.clinics.findById(claimed.clinic).select('name address').exec(),
         ]);
         if (!clinic || !patient || !isEmailRecipient(patient.emailAddress)) {
@@ -76,7 +77,7 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
           continue;
         }
         await this.mailer.sendAppointmentChange(patient.emailAddress, {
-          kind: claimed.kind, clinicName: clinic.name, clinicAddress: clinic.address || '',
+          kind: claimed.kind, patientName: patient.patientName, clinicName: clinic.name, clinicAddress: clinic.address || '',
           date: claimed.schedule.date, startTime: claimed.schedule.startTime, endTime: claimed.schedule.endTime,
           ...(claimed.kind === 'confirmed' ? { arrivalDeadline: reservationDeadline(new Date(claimed.schedule.date), claimed.schedule.startTime) } : {}),
           ...(claimed.previousSchedule ? { previousSchedule: {

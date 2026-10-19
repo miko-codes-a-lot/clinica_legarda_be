@@ -1,3 +1,5 @@
+import { findPatientRecipient } from '../users/patient-recipient';
+import { CreateNotificationDto } from '../notifications/dto/create-notification.dto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model } from 'mongoose';
@@ -67,10 +69,14 @@ export class ClinicClosuresService implements OnModuleInit {
             $push: { history: { action: 'Appointment affected by clinic closure.', actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } },
           }, { session });
         }
-        const notices = rows.flatMap(row => [
-          { recipient: referenceId(row.patient), appointment: row._id, type: NotificationType.CLINIC_CLOSURE, message: 'A clinic closure affects your appointment. Contact the clinic to review the schedule.', link: '/app/my-appointment', triggeredBy: referenceId(actor.sub) },
-          { recipient: referenceId(row.dentist), appointment: row._id, type: NotificationType.CLINIC_CLOSURE, message: 'A clinic closure affects an appointment in your schedule. Review it with clinic staff.', link: `/dentist/appointment/details/${row.id}`, triggeredBy: referenceId(actor.sub) },
-        ]);
+        const notices: CreateNotificationDto[] = [];
+        for (const row of rows) {
+          const recipient = await findPatientRecipient(this.users, row.patient, session);
+          notices.push(
+          ...(recipient ? [{ recipient: recipient.id, appointment: referenceId(row._id), type: NotificationType.CLINIC_CLOSURE, message: `${recipient.patientName ? recipient.patientName + ': ' : ''}A clinic closure affects your appointment. Contact the clinic to review the schedule.`, link: '/app/my-appointment', triggeredBy: referenceId(actor.sub) }] : []),
+          { recipient: referenceId(row.dentist), appointment: referenceId(row._id), type: NotificationType.CLINIC_CLOSURE, message: 'A clinic closure affects an appointment in your schedule. Review it with clinic staff.', link: `/dentist/appointment/details/${row.id}`, triggeredBy: referenceId(actor.sub) },
+          );
+        }
         const notifications = notices.length ? await this.notifications.insertMany(notices, { session }) : [];
         return { id: closure.id as string, notifications };
       });

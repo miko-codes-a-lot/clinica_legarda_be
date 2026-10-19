@@ -19,7 +19,7 @@ describe('patient care access and search', () => {
     expect(careScope({ sub: user, role: 'dentist', clinics: [clinic] })).toEqual({ dentist: user });
   });
   it('limits patients to their own records', () => {
-    expect(careScope({ sub: user, role: 'user' })).toEqual({ patient: user });
+    expect(careScope({ sub: user, role: 'user' })).toEqual({ patient: { $in: [user] } });
   });
   it('allows super admin global records', () => {
     expect(careScope({ sub: user, role: 'super-admin' })).toEqual({});

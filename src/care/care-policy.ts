@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Types } from 'mongoose';
-import { UserActor } from '../auth/role-policy';
+import { actorPatientIds, UserActor } from '../auth/role-policy';
 import { referenceId } from '../auth/reference-id';
 import { adminClinicScope } from '../auth/clinic-policy';
 
@@ -21,7 +21,7 @@ export function careScope(actor: UserActor, clinic?: string): Record<string, unk
   if (actor.role === 'super-admin') scope = {};
   else if (actor.role === 'admin') scope = adminClinicScope(actor);
   else if (actor.role === 'dentist') scope = { dentist: referenceId(actor.sub) };
-  else if (actor.role === 'user') scope = { patient: referenceId(actor.sub) };
+  else if (actor.role === 'user') scope = { patient: { $in: actorPatientIds(actor).map(referenceId) } };
   else throw new ForbiddenException('You cannot access care records.');
   if (!clinic) return scope;
   if (actor.role !== 'user') requireCareClinic(actor, clinic);
