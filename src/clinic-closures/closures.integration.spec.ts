@@ -102,6 +102,17 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     await patch(`/appointments/${f.appointment}/clear-disruption`,{reason:'Original appointment can proceed'}).expect(200);
     const a = await appointments.findById(f.appointment); expect(a?.disruption).toBeUndefined(); expect(a?.history.at(-1)?.reason).toBe('Original appointment can proceed');
   });
+  it('preserves dentist availability causes when adding and resolving a closure', async () => {
+    const source = f.dentist;
+    await appointments.updateOne({ _id: f.appointment }, { disruption: { closures: [], dentistAvailability: [source], flaggedAt: new Date(), message: 'Availability changed' } });
+    const c = await post('/clinic-closures', closure()).expect(201);
+    expect((await appointments.findById(f.appointment))?.disruption?.dentistAvailability?.map(String)).toEqual([source]);
+    await patch(`/clinic-closures/${c.body.closure._id}/reopen`, { reason: 'Reopened' }).expect(200);
+    await patch(`/appointments/${f.appointment}/clear-disruption`, { reason: 'Closure resolved' }).expect(200);
+    const current = await appointments.findById(f.appointment);
+    expect(current?.disruption?.closures).toHaveLength(0);
+    expect(current?.disruption?.dentistAvailability?.map(String)).toEqual([source]);
+  });
   it('keeps overlapping closures blocking until all applicable intervals reopen', async () => {
     const first = await post('/clinic-closures',closure()).expect(201);
     await post('/clinic-closures',closure({startTime:'10:00',endTime:'13:00'})).expect(201);

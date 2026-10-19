@@ -10,6 +10,8 @@ import { DentalCatalog } from '../dental-catalog/entities/dental-catalog.entity'
 import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
 import { clinicReferenceId } from '../users/clinic-membership';
 import { calendarDay, ScheduleRequest, validateSchedule } from './appointment-scheduling.rules';
+import { DentistDayAvailability } from '../dentist-availability/entities/dentist-day-availability.entity';
+import { assertAvailable } from '../dentist-availability/availability-rules';
 
 export const OCCUPIED_STATUSES = [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED];
 
@@ -26,6 +28,7 @@ export class AppointmentSchedulingService {
     @InjectModel(Clinic.name) private readonly clinics: Model<Clinic>,
     @InjectModel(DentalCatalog.name) private readonly services: Model<DentalCatalog>,
     @InjectModel(ClinicClosure.name) private readonly closures?: Model<ClinicClosure>,
+    @InjectModel(DentistDayAvailability.name) private readonly availability?: Model<DentistDayAvailability>,
   ) {}
 
   async withLocks<T>(userIds: string[], work: (session: ClientSession) => Promise<T>): Promise<T> {
@@ -84,7 +87,12 @@ export class AppointmentSchedulingService {
       if (!Number.isFinite(minutes) || minutes < 0) throw new BadRequestException('Service duration is unavailable');
       return sum + minutes;
     }, 0);
-    validateSchedule(request, dentist, clinic.operatingHours, duration([...new Set(request.services)]), appointments.map(appointment => ({
+    const override = this.availability && await this.availability.findOne({ dentist: request.dentist, clinic: request.clinic, date: day.toISOString().slice(0, 10), useWeeklyHours: { $ne: true } }).session(session);
+    const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][day.getUTCDay()];
+    if (override) {
+      assertAvailable(override.intervals, request.startTime, request.endTime);
+    }
+    validateSchedule(request, override ? { ...dentist.toObject(), operatingHours: override.intervals.map(row => ({ startTime: row.startTime, endTime: row.endTime, day: dayName })) } : dentist, clinic.operatingHours, duration([...new Set(request.services)]), appointments.map(appointment => ({
       dentist: clinicReferenceId(appointment.dentist) ?? '',
       patient: clinicReferenceId(appointment.patient) ?? '',
       startTime: appointment.startTime,

@@ -63,7 +63,7 @@ export class ClinicClosuresService implements OnModuleInit {
         const now = new Date();
         for (const row of rows) {
           await this.appointments.updateOne({ _id: row._id, status: { $in: ['pending', 'confirmed'] } }, {
-            $set: { disruption: { closures: [...(row.disruption?.closures ?? []), closure._id], flaggedAt: now, message: 'Clinic closure affects this appointment. Contact the clinic to arrange the next step.' } },
+            $set: { disruption: { closures: [...(row.disruption?.closures ?? []), closure._id], dentistAvailability: row.disruption?.dentistAvailability ?? [], flaggedAt: now, message: 'Clinic or dentist availability affects this appointment. Contact the clinic to arrange the next step.' } },
             $push: { history: { action: 'Appointment affected by clinic closure.', actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } },
           }, { session });
         }
@@ -105,7 +105,10 @@ export class ClinicClosuresService implements OnModuleInit {
       if (!current?.disruption) throw new ConflictException('This appointment has no unresolved closure flag.');
       const active = await this.closures.find({ clinic: referenceId(current.clinic), status: 'active' }).session(session);
       assertOpenInterval(active, current.date.toISOString().slice(0,10), current.startTime, current.endTime);
-      await this.appointments.updateOne({ _id: current._id }, { $unset: { disruption: 1 }, $push: { history: { action: 'Closure disruption resolved.', reason: reason.trim(), actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } } }, { session });
+      await this.appointments.updateOne({ _id: current._id }, {
+        ...(current.disruption.dentistAvailability?.length ? { $set: { 'disruption.closures': [] } } : { $unset: { disruption: 1 } }),
+        $push: { history: { action: 'Closure disruption resolved.', reason: reason.trim(), actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } },
+      }, { session });
     });
     return { message: 'Closure flag resolved.' };
   }

@@ -15,12 +15,14 @@ import {
 import { Visit, VisitSchema } from '../care/entities/visit.entity';
 import { TreatmentCase, TreatmentCaseSchema } from '../care/entities/treatment-case.entity';
 import { AppointmentChangeEmail, AppointmentChangeEmailSchema } from '../appointment-change-emails/entities/appointment-change-email.entity';
+import { DentistDayAvailability, DentistDayAvailabilitySchema } from '../dentist-availability/entities/dentist-day-availability.entity';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: AppointmentChangeEmail.name, schema: AppointmentChangeEmailSchema },
       { name: Appointment.name, schema: AppointmentSchema },
+      { name: DentistDayAvailability.name, schema: DentistDayAvailabilitySchema },
       { name: Referral.name, schema: ReferralSchema },
       { name: User.name, schema: UserSchema }, // ✅ ADD
       { name: DentalCatalog.name, schema: DentalCatalogSchema },
@@ -32,6 +34,6 @@ import { AppointmentChangeEmail, AppointmentChangeEmailSchema } from '../appoint
   ],
   controllers: [AppointmentsController],
   providers: [AppointmentsService, AppointmentSchedulingService],
-  exports: [AppointmentsService], // ✅ REQUIRED
+  exports: [AppointmentsService, AppointmentSchedulingService],
 })
 export class AppointmentsModule {}

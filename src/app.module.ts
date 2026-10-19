@@ -21,6 +21,7 @@ import { join } from 'path';
 import { CareModule } from './care/care.module';
 import { AppointmentRemindersModule } from './appointment-reminders/appointment-reminders.module';
 import { AppointmentChangeEmailsModule } from './appointment-change-emails/appointment-change-emails.module';
+import { DentistAvailabilityModule } from './dentist-availability/dentist-availability.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AppointmentChangeEmailsModule } from './appointment-change-emails/appoi
     AppointmentsModule,
     AppointmentRemindersModule,
     AppointmentChangeEmailsModule,
+    DentistAvailabilityModule,
     NotificationsModule,
     AnalyticsModule,
     ReferralsModule,

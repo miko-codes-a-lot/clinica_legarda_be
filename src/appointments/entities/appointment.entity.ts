@@ -41,6 +41,7 @@ export class AppointmentNote {
 @Schema({ _id: false })
 export class AppointmentDisruption {
   @Prop({ type: [mongoose.Schema.Types.ObjectId], ref: 'ClinicClosure', required: true }) closures: mongoose.Types.ObjectId[];
+  @Prop({ type: [mongoose.Schema.Types.ObjectId], ref: 'DentistDayAvailability', default: [] }) dentistAvailability?: mongoose.Types.ObjectId[];
   @Prop({ required: true }) flaggedAt: Date;
   @Prop({ required: true }) message: string;
 }
