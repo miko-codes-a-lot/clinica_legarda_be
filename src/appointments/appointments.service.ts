@@ -481,10 +481,12 @@ export class AppointmentsService {
             : [AppointmentStatus.PENDING];
       this.requireStatus(current, allowed);
       if (status === AppointmentStatus.CANCELLED) {
+        const staffCancellation = current.status === AppointmentStatus.CONFIRMED &&
+          (isAdmin(actor) || actor.role === 'dentist');
         const creator = current.createdBy?.toString() ?? current.history.find(
           entry => entry.action === 'Appointment created.',
         )?.actorId;
-        if (!creator || !Types.ObjectId.isValid(creator) || !sameId(creator, actor.sub)) {
+        if (!staffCancellation && (!creator || !Types.ObjectId.isValid(creator) || !sameId(creator, actor.sub))) {
           throw new ForbiddenException('Only the person who created this appointment may cancel it.');
         }
         if (Date.now() >= appointmentStart(current.date, current.startTime).getTime()) {

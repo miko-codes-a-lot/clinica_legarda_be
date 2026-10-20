@@ -226,6 +226,23 @@ localTests('Appointment lifecycle', () => {
       .set('Cookie', 'jwt=patient').send({ reason: 'Plans changed' }).expect(200);
   });
 
+  it('lets the treating dentist cancel a confirmed booking through HTTP with an attributed reason', async () => {
+    const created = await service.create(booking(), actor('user'));
+    await service.approve(created._id.toString(), actor('dentist'));
+    await request(app.getHttpServer()).patch(`/appointments/${created._id.toString()}/cancel`)
+      .set('Cookie', 'jwt=dentist').send({ reason: 'Dentist unavailable' }).expect(200);
+    const stored = await appointments.findById(created._id);
+    expect(stored?.status).toBe(Status.CANCELLED);
+    expect(stored?.createdBy?.toString()).toBe(fixture.patient);
+    expect(stored?.history.at(-1)).toMatchObject({ actorId: fixture.dentist, reason: 'Dentist unavailable' });
+  });
+
+  it.each(['admin', 'super-admin'])('lets an authorized %s cancel a confirmed booking without becoming its creator', async role => {
+    const result = await service.cancel(fixture.appointment, { ...admin, role, clinics: [fixture.clinic] }, 'Clinic unavailable');
+    expect(result.status).toBe(Status.CANCELLED);
+    expect(result.history.at(-1)).toMatchObject({ actorId: admin.sub, reason: 'Clinic unavailable' });
+  });
+
   it('requires a reason before atomically saving rejection and its attributed history', async () => {
     await setStatus(Status.PENDING);
     const before = await appointments.findById(fixture.appointment).lean();

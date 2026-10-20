@@ -93,10 +93,35 @@ describe('Appointment changes', () => {
     { sub: '000000000000000000000003', role: 'dentist' },
     { sub: '000000000000000000000004', role: 'admin', clinics: ['000000000000000000000001'] },
     { sub: '000000000000000000000005', role: 'super-admin' },
-  ])('does not let a non-creator $role cancel a patient booking', async other => {
-    await expect(service.cancel(current.id, other, 'Schedule conflict')).rejects.toBeInstanceOf(ForbiddenException);
+  ])('lets an authorized non-creator $role cancel a confirmed patient booking', async other => {
+    const result = await service.cancel(current.id, other, 'Schedule conflict');
+    expect(result.status).toBe(AppointmentStatus.CANCELLED);
+    expect(result.history.at(-1)).toMatchObject({ actorId: other.sub, reason: 'Schedule conflict' });
+    expect(enqueueEmail).toHaveBeenCalledWith([expect.objectContaining({ kind: 'cancelled' })], expect.anything());
+  });
+
+  it('retains creator ownership for pending bookings', async () => {
+    current.status = AppointmentStatus.PENDING;
+    await expect(service.cancel(current.id, { sub: String(current.dentist), role: 'dentist' }, 'Schedule conflict')).rejects.toBeInstanceOf(ForbiddenException);
     expect(update).not.toHaveBeenCalled();
-    expect(current.status).toBe(AppointmentStatus.CONFIRMED);
+  });
+
+  it.each([
+    { sub: '000000000000000000000006', role: 'dentist' },
+    { sub: '000000000000000000000004', role: 'admin', clinics: ['000000000000000000000007'] },
+  ])('keeps confirmed cancellations within the $role appointment scope', async other => {
+    await expect(service.cancel(current.id, other, 'Outside scope')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('blocks non-creator dentist cancellation after the start and after check-in', async () => {
+    const dentist = { sub: String(current.dentist), role: 'dentist' };
+    activeVisit = true;
+    await expect(service.cancel(current.id, dentist, 'Patient arrived')).rejects.toThrow('checked in');
+    activeVisit = false;
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-15T01:00:00Z').getTime());
+    await expect(service.cancel(current.id, dentist, 'Too late')).rejects.toThrow('started');
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('does not let the patient cancel a booking created by staff', async () => {
