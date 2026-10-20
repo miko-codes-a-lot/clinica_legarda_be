@@ -128,4 +128,15 @@ describe('Appointment SMS', () => {
     post.mockResolvedValue({ data: [] });
     await expect(new SmsService().sendAppointmentReminder('+639171234567', appointment)).rejects.toThrow();
   });
+
+  it.each(['Failed', 'Refunded'])('does not record an explicit %s gateway response as successful delivery', async status => {
+    post.mockResolvedValue({ data: [{ message_id: 'm-rejected', status }] });
+    await expect(new SmsService().sendAppointmentReminder('+639171234567', appointment)).rejects.toThrow();
+    await expect(new SmsService().sendAppointmentChange('+639171234567', { ...appointment, kind: 'cancelled', changedAt })).rejects.toThrow();
+  });
+
+  it.each(['Queued', 'Pending', 'Sent'])('accepts a %s message without retrying an accepted request', async status => {
+    post.mockResolvedValue({ data: [{ message_id: 'm-accepted', status }] });
+    await expect(new SmsService().sendAppointmentReminder('+639171234567', appointment)).resolves.toBeUndefined();
+  });
 });

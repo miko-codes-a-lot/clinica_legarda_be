@@ -3,7 +3,7 @@ export default () => ({
   frontendUri: process.env.FRONTEND_URI,
   appointmentReminders: { enabled: process.env.APPOINTMENT_REMINDERS_ENABLED === 'true' },
   appointmentChangeEmails: { enabled: process.env.APPOINTMENT_CHANGE_EMAILS_ENABLED === 'true' },
-  appointmentSms: { enabled: process.env.APPOINTMENT_SMS_ENABLED === 'true' },
+  appointmentSms: { enabled: process.env.APPOINTMENT_SMS_ENABLED === 'true', enforceFrom: process.env.APPOINTMENT_SMS_ENFORCE_FROM },
   appointmentNoShows: { enabled: process.env.APPOINTMENT_NO_SHOWS_ENABLED === 'true', enforceFrom: process.env.APPOINTMENT_NO_SHOWS_ENFORCE_FROM },
   db: {
     uri: process.env.DATABASE_URI,

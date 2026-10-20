@@ -16,8 +16,8 @@ const uri = process.env.TEST_CHANGE_SMS_MONGO_URI;
   let clinics: Model<Clinic>;
   let fixture: { patient: string; clinic: string };
   const send = jest.fn<Promise<void>, Parameters<SmsService['sendAppointmentChange']>>();
-  const worker = () => new AppointmentChangeSmsService(outbox, users, clinics,
-    { sendAppointmentChange: send } as unknown as SmsService, new ConfigService(), appointments);
+  const worker = (enforceFrom?: string) => new AppointmentChangeSmsService(outbox, users, clinics,
+    { sendAppointmentChange: send } as unknown as SmsService, new ConfigService({ appointmentSms: { enforceFrom } }), appointments);
   const event = (extra: Record<string, unknown> = {}) => outbox.create({ appointment: new Types.ObjectId(), patient: fixture.patient, clinic: fixture.clinic,
     kind: 'rejected', schedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' }, reason: 'Dentist unavailable', ...extra });
   const confirmed = () => appointments.create({ clinic: fixture.clinic, patient: fixture.patient, dentist: new Types.ObjectId(),
@@ -72,6 +72,21 @@ const uri = process.env.TEST_CHANGE_SMS_MONGO_URI;
     await worker().sendPending();
     expect(send).toHaveBeenCalledTimes(1);
     expect((await outbox.findById(queued._id))?.smsSentAt).toBeInstanceOf(Date);
+  });
+
+  it('does not replay pre-activation events after enabling SMS or restarting the worker', async () => {
+    clock('2026-10-20T04:00:00Z');
+    const old = await event({ sentAt: new Date() });
+    await outbox.collection.updateOne({ _id: old._id }, { $set: { createdAt: new Date('2026-10-20T02:59:59Z') } });
+    const fresh = await event();
+    const floor = '2026-10-20T03:00:00Z';
+    await worker(floor).sendPending();
+    await worker(floor).sendPending();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await outbox.findById(fresh._id))?.smsSentAt).toBeInstanceOf(Date);
+    const retained = await outbox.findById(old._id);
+    expect(retained?.smsSentAt).toBeUndefined();
+    expect(retained?.smsSkippedAt).toBeUndefined();
   });
 
   it.each([undefined, '', '12345', '+639171234567,+639181234567'])('skips a patient whose mobile number is %p, leaving email delivery untouched', async (mobileNumber) => {

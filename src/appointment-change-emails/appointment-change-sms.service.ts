@@ -50,8 +50,11 @@ export class AppointmentChangeSmsService implements OnApplicationBootstrap, OnMo
   }
 
   async sendPending(): Promise<void> {
+    const enforceFrom = this.config.get<string>('appointmentSms.enforceFrom');
+    const activation = enforceFrom ? Date.parse(enforceFrom) : 0;
+    if (!Number.isFinite(activation)) throw new Error('Invalid appointment SMS activation date.');
     const pending = { smsSentAt: { $exists: false }, smsSkippedAt: { $exists: false },
-      createdAt: { $gte: new Date(Date.now() - MAX_EVENT_AGE) },
+      createdAt: { $gte: new Date(Math.max(Date.now() - MAX_EVENT_AGE, activation)) },
       $or: [{ smsLockedUntil: { $exists: false } }, { smsLockedUntil: { $lte: new Date() } }] };
     const events = await this.outbox.find(pending).sort({ createdAt: 1, _id: 1 }).limit(100).exec();
     for (const event of events) {

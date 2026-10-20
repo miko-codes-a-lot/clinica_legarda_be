@@ -5,6 +5,19 @@ import { UserStatus } from '../_shared/enum/user-status.enum';
 const patient = { _id: new Types.ObjectId(), firstName: 'Alice', lastName: 'Child', isDependent: true, emailAddress: 'old-child@clinic-mail.ph' };
 const guardian = { _id: new Types.ObjectId(), role: 'user', status: UserStatus.CONFIRMED, otpVerifiedAt: new Date(), emailAddress: 'parent@clinic-mail.ph' };
 describe('current appointment notice recipient', () => {
+  const learningPatient = { ...patient, _id: new Types.ObjectId('70c400000000000000000006'), isDependent: false, mobileNumber: '+639171113001' };
+  it('suppresses the unchanged fictional learning phone while retaining email delivery', () => {
+    expect(patientRecipient(learningPatient)).toMatchObject({ emailAddress: patient.emailAddress, mobileNumber: undefined });
+  });
+  it('allows a learning account to receive SMS after replacing its fictional number', () => {
+    expect(patientRecipient({ ...learningPatient, mobileNumber: '+639181234567' })?.mobileNumber).toBe('+639181234567');
+  });
+  it('does not suppress an ordinary real patient solely because their number matches a fixture', () => {
+    expect(patientRecipient({ ...learningPatient, _id: new Types.ObjectId() })?.mobileNumber).toBe(learningPatient.mobileNumber);
+  });
+  it('also suppresses a fictional learning parent contact for dependent notices', () => {
+    expect(patientRecipient({ ...patient, guardian: { ...guardian, _id: learningPatient._id, mobileNumber: learningPatient.mobileNumber } })?.mobileNumber).toBeUndefined();
+  });
   it('uses the verified current parent and names the child', () => {
     expect(patientRecipient({ ...patient, guardian })).toEqual({ id: String(guardian._id), emailAddress: guardian.emailAddress, patientName: 'Alice Child' });
   });

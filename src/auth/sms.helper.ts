@@ -51,6 +51,9 @@ export async function sendViaSemaphore(
   if (!result || !result.message_id) {
     throw new Error('Semaphore did not return message_id');
   }
+  if (typeof result.status === 'string' && ['failed', 'refunded'].includes(result.status.toLowerCase())) {
+    throw new Error('Semaphore rejected the SMS');
+  }
 
   return result.message_id;
 }
