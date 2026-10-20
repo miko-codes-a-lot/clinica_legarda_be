@@ -41,6 +41,8 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     await outbox.init();
   });
   beforeEach(async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'performance', 'queueMicrotask'] });
+    jest.setSystemTime(new Date('2026-10-18T00:00:00Z'));
     await Promise.all([appointments.deleteMany({}), outbox.deleteMany({}), users.deleteMany({}), clinics.deleteMany({}), catalog.deleteMany({}), referrals.deleteMany({})]);
     send.mockReset().mockResolvedValue(undefined);
     const hours = ['monday', 'tuesday'].map(day => ({ day, startTime: '09:00', endTime: '16:00' }));
@@ -130,19 +132,18 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     expect(await outbox.countDocuments()).toBe(0);
   });
 
-  it('delivers a staff reschedule even when it is confirmed before the notice worker runs', async () => {
-    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
+  it('sends the accepted revised schedule instead of an obsolete response prompt', async () => {
     const appointment = await book();
-    await service.reschedule(appointment.id, reschedule, actor());
-    await service.approve(appointment.id, actor());
-    await worker().sendPending();
-    await worker().sendPending();
+    const revised = await service.reschedule(appointment.id, reschedule, actor());
+    await service.respondToReschedule(appointment.id, { proposalId: revised.rescheduleProposal?.id ?? '', method: 'patient_portal' },
+      { sub: fixture.patient, role: 'user' });
+    await worker().sendPending(); await worker().sendPending();
+    expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({
-      kind: 'rescheduled', reason: reschedule.reason,
+      kind: 'confirmed', reason: reschedule.reason,
       previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' },
     }));
-    expect(send.mock.calls.filter(([, notice]) => notice.kind === 'rescheduled')).toHaveLength(1);
-    expect(await outbox.countDocuments({ kind: 'rescheduled', sentAt: { $exists: true } })).toBe(1);
+    expect(await outbox.countDocuments({ kind: 'rescheduled', skippedAt: { $exists: true } })).toBe(1);
   });
 
   it('also queues a staff edit that changes a pending appointment schedule without copying clinical notes', async () => {

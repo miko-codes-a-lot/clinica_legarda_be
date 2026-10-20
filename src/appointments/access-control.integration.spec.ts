@@ -111,7 +111,9 @@ localTests('Record access boundaries', () => {
     app.useGlobalPipes(new ValidationPipe());
     await app.init();
   });
+  afterEach(() => jest.restoreAllMocks());
   beforeEach(async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-01').getTime());
     await appointments.deleteMany({});
     await referrals.deleteMany({});
     await users.deleteMany({});

@@ -18,6 +18,7 @@ import { AppointmentUpsertDto } from './dto/appointment-upsert.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 import { RejectAppointmentDto } from './dto/reject-appointment.dto';
 import { AppointmentChangeReasonDto } from './dto/appointment-change-reason.dto';
+import { RescheduleResponseDto } from './dto/reschedule-response.dto';
 
 @Controller('appointments')
 export class AppointmentsController {
@@ -110,7 +111,12 @@ export class AppointmentsController {
     @Body() dto: AppointmentChangeReasonDto,
     @User() actor: UserActor,
   ) {
-    return this.appointmentsService.cancel(id, actor, dto.reason);
+    return this.appointmentsService.cancel(id, actor, dto.reason, dto.proposalId);
+  }
+
+  @Patch(':id/reschedule-response')
+  respondToReschedule(@Param('id') id: string, @Body(new ValidationPipe()) dto: RescheduleResponseDto, @User() actor: UserActor) {
+    return this.appointmentsService.respondToReschedule(id, dto, actor);
   }
 
   @Patch(':id/reschedule')

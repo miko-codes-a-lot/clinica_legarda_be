@@ -45,17 +45,18 @@ export async function findReminderCandidates(appointments: Model<Appointment>, n
     status: AppointmentStatus.CONFIRMED,
     date: { $gte: day, $lt: new Date(day.getTime() + 2 * DAY) },
     disruption: { $exists: false },
-  }).select('date startTime endTime status patient clinic disruption')
+  }).select('date startTime endTime status patient clinic disruption scheduleVersion')
     .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
     .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
 }
 
 /** One reminder per appointment schedule, patient and clinic: a changed schedule is reminded again. */
 export function reminderKey(appointment: PopulatedAppointment): string {
-  return createHash('sha256').update(JSON.stringify([
+  const schedule = [
     appointment._id, appointment.date.toISOString().slice(0, 10), appointment.startTime,
     appointment.endTime, appointment.patient?._id, appointment.clinic?._id,
-  ])).digest('hex');
+  ];
+  return createHash('sha256').update(JSON.stringify((appointment.scheduleVersion ?? 0) > 0 ? [...schedule, appointment.scheduleVersion] : schedule)).digest('hex');
 }
 
 /** The appointment as it is now, only if it still has the scanned schedule, patient and clinic and is still confirmed. */
@@ -64,7 +65,9 @@ export function findCurrentReminderAppointment(appointments: Model<Appointment>,
     _id: appointment._id, date: appointment.date, startTime: appointment.startTime,
     endTime: appointment.endTime, patient: appointment.patient?._id, clinic: appointment.clinic?._id,
     status: AppointmentStatus.CONFIRMED, disruption: { $exists: false },
-  }).select('date startTime endTime status patient clinic disruption')
+    ...((appointment.scheduleVersion ?? 0) > 0 ? { scheduleVersion: appointment.scheduleVersion } :
+      { $or: [{ scheduleVersion: { $exists: false } }, { scheduleVersion: 0 }] }),
+  }).select('date startTime endTime status patient clinic disruption scheduleVersion')
     .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
     .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
 }

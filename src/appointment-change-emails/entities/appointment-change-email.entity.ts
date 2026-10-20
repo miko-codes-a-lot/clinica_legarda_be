@@ -19,6 +19,8 @@ export class AppointmentChangeEmail {
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Clinic', required: true }) clinic: Types.ObjectId;
   @Prop({ enum: ['confirmed', 'rescheduled', 'rejected', 'cancelled', 'disrupted'], required: true }) kind: AppointmentEmailKind;
   @Prop() eventKey?: string;
+  @Prop() scheduleVersion?: number;
+  @Prop() proposalId?: string;
   @Prop({ type: AppointmentEmailSchedule, required: true }) schedule: AppointmentEmailSchedule;
   @Prop({ type: AppointmentEmailSchedule }) previousSchedule?: AppointmentEmailSchedule;
   @Prop({ maxlength: 500 }) reason?: string;

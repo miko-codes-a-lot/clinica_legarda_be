@@ -1,6 +1,9 @@
-import { IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf } from 'class-validator';
 
 export class AppointmentChangeReasonDto {
+  @IsOptional()
+  @IsUUID()
+  proposalId?: string;
   // Older clients may omit this field; supplied reasons must be meaningful.
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()

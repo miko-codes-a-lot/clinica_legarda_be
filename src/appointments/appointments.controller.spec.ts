@@ -39,7 +39,7 @@ describe('Appointment change HTTP contracts', () => {
   it('passes a cancellation reason through the HTTP endpoint', async () => {
     await request(app.getHttpServer()).patch('/appointments/a1/cancel')
       .send({ reason: 'Work conflict' }).expect(200).expect({ _id: 'a1', reason: 'Work conflict' });
-    expect(cancel).toHaveBeenCalledWith('a1', actor, 'Work conflict');
+    expect(cancel).toHaveBeenCalledWith('a1', actor, 'Work conflict', undefined);
   });
   it.each(['', '   ', null, 17, 'x'.repeat(501)])('rejects invalid cancellation reason %p', async reason => {
     await request(app.getHttpServer()).patch('/appointments/a1/cancel').send({ reason }).expect(400);

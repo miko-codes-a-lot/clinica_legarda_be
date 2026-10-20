@@ -139,4 +139,17 @@ describe('Appointment SMS', () => {
     post.mockResolvedValue({ data: [{ message_id: 'm-accepted', status }] });
     await expect(new SmsService().sendAppointmentReminder('+639171234567', appointment)).resolves.toBeUndefined();
   });
+  it('asks for patient agreement in the proposal, then confirms only the accepted revised schedule',async()=>{
+    const change={clinicName:'Test Clinic',clinicAddress:'',date:'2026-10-26',startTime:'11:00',endTime:'11:30',changedAt:new Date('2026-10-20'),
+      previousSchedule:{date:'2026-10-26',startTime:'09:00',endTime:'09:30'},reason:'Dentist schedule changed'};
+    await new SmsService().sendAppointmentChange('09171234567',{...change,kind:'rescheduled',responseRequired:true});
+    const proposal=request().message;
+    expect(proposal).toContain('accept');expect(proposal).toContain('automatic cancellation');expect(proposal).not.toContain('Check in by');
+    expect(proposal).toContain('Previous schedule');expect(proposal).toContain('Revised schedule');
+    await new SmsService().sendAppointmentChange('09171234567',{...change,kind:'confirmed'});
+    const accepted=request().message;
+    expect(accepted).toContain('Your revised appointment is confirmed');expect(accepted).toContain('agreement');
+    expect(accepted).toContain('11:20 AM');expect(accepted).not.toContain('not confirmed until');
+  });
+
 });

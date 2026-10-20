@@ -75,7 +75,7 @@ export class AppointmentChangeSmsService implements OnApplicationBootstrap, OnMo
         ]);
         if (!clinic || !patient || !isSmsRecipient(patient.mobileNumber)) { await skip(); continue; }
         await this.sms.sendAppointmentChange(patient.mobileNumber, {
-          kind: claimed.kind, patientName: patient.patientName, clinicName: clinic.name, clinicAddress: clinic.address || '',
+          kind: claimed.kind, ...(claimed.proposalId ? { responseRequired: true } : {}), patientName: patient.patientName, clinicName: clinic.name, clinicAddress: clinic.address || '',
           date: claimed.schedule.date, startTime: claimed.schedule.startTime, endTime: claimed.schedule.endTime,
           ...(claimed.kind === 'confirmed' ? { arrivalDeadline: reservationDeadline(new Date(claimed.schedule.date), claimed.schedule.startTime) } : {}),
           ...(claimed.previousSchedule ? { previousSchedule: {

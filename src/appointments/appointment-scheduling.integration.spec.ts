@@ -46,7 +46,9 @@ localTests('Appointment scheduling persistence', () => {
       competingConnection.model(Clinic.name, ClinicSchema), competingConnection.model(DentalCatalog.name, DentalCatalogSchema),
     ), competingConnection.model(Referral.name, ReferralSchema), competingConnection.model<User>(User.name));
   });
+  afterEach(() => jest.restoreAllMocks());
   beforeEach(async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-01').getTime());
     await appointments.deleteMany({});
     await users.deleteMany({});
     await clinics.deleteMany({});
@@ -88,7 +90,7 @@ localTests('Appointment scheduling persistence', () => {
   it('reschedules with stored identities, excludes itself, and preserves history', async () => {
     const current = await appointments.create({ ...fixture, date, startTime: '09:00', endTime: '10:00', status: 'confirmed', history: [{ action: 'Existing history' }] });
     const result = await service.reschedule(current.id, {
-      date, startTime: '09:00', endTime: '10:00', patient: fixture.otherPatient,
+      date, startTime: '10:00', endTime: '11:00', patient: fixture.otherPatient,
       dentist: fixture.otherPatient, reason: '  Correct calendar  ',
     }, actor);
     expect(result.patient._id.toString()).toBe(fixture.patient);

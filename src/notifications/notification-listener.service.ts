@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import {
   Appointment,
   AppointmentDocument,
+  AppointmentHistory,
 } from 'src/appointments/entities/appointment.entity';
 import { NotificationsService } from './notifications.service';
 import { NotificationType } from './entities/notification.entity';
@@ -37,19 +38,24 @@ export class NotificationListenerService implements OnModuleInit {
                 await this.handleAppointmentCreation(change.fullDocument);
                 break;
               case 'update': {
-                const fields = change.updateDescription.updatedFields;
+                const fields = change.updateDescription.updatedFields ?? {};
                 const rescheduled = ['date', 'startTime', 'endTime'].some(
                   field => Object.prototype.hasOwnProperty.call(fields, field),
                 );
-                if (fields?.status || rescheduled) {
+                const proposalChanged = Object.keys(fields).some(key => key === 'rescheduleProposal' || key.startsWith('rescheduleProposal.')) ||
+                  change.updateDescription.removedFields?.includes('rescheduleProposal');
+                if (fields?.status || rescheduled || proposalChanged) {
                   const updatedAppointment = await this.appointmentModel
                     .findById(change.documentKey._id)
                     .populate('patient dentist');
 
-                  if (updatedAppointment) {
+                  if (updatedAppointment && this.matchesHistoryEvent(fields, updatedAppointment) && (!fields.status || fields.status === updatedAppointment.status) &&
+                    (fields.scheduleVersion === undefined || fields.scheduleVersion === (updatedAppointment.scheduleVersion ?? 0)) &&
+                    (!fields.rescheduleProposal || (fields.rescheduleProposal as { id?: string }).id === updatedAppointment.rescheduleProposal?.id)) {
                     await this.handleAppointmentStatusUpdate(
                       updatedAppointment,
-                      rescheduled,
+                      rescheduled || (!!proposalChanged && updatedAppointment.status === AppointmentStatus.PENDING),
+                      updatedAppointment.history?.[this.historyEventIndex(fields) ?? (updatedAppointment.history.length - 1)],
                     );
                   }
                 }
@@ -67,6 +73,26 @@ export class NotificationListenerService implements OnModuleInit {
       });
   }
 
+  /** Mongo emits a pushed history entry either as the full array or history.N. */
+  private historyEventIndex(fields: Record<string, unknown>): number | undefined {
+    if (Array.isArray(fields.history)) return fields.history.length - 1;
+    const indexes = Object.keys(fields).flatMap(key => {
+      const match = /^history\.(\d+)$/.exec(key);
+      return match ? [Number(match[1])] : [];
+    });
+    return indexes.length ? Math.max(...indexes) : undefined;
+  }
+
+  private matchesHistoryEvent(fields: Record<string, unknown>, appointment: AppointmentDocument): boolean {
+    const index = this.historyEventIndex(fields);
+    if (index === undefined) return true;
+    const history = appointment.history ?? [];
+    // Notes do not supersede a decision. Use the decision's own actor below.
+    // A later proposal/response/status transition does supersede it.
+    return index >= 0 && index < history.length && history.slice(index + 1).every(entry =>
+      ['Clinical notes updated.', 'Appointment details updated.'].includes(entry.action));
+  }
+
   private async handleAppointmentCreation(appointment: AppointmentDocument) {
     this.logger.log(`New appointment created: ${appointment._id.toString()}`);
 
@@ -74,6 +100,7 @@ export class NotificationListenerService implements OnModuleInit {
       .findById(appointment._id)
       .populate('patient dentist');
 
+    if (populatedAppointment && ((populatedAppointment.scheduleVersion ?? 0) !== (appointment.scheduleVersion ?? 0) || populatedAppointment.status !== appointment.status)) return;
     if (!populatedAppointment) {
       this.logger.error(
         `Newly created appointment not found: ${appointment._id.toString()}`,
@@ -132,6 +159,7 @@ export class NotificationListenerService implements OnModuleInit {
   private async handleAppointmentStatusUpdate(
     appointment: AppointmentDocument,
     rescheduled = false,
+    transition?: AppointmentHistory,
   ) {
     this.logger.log(
       `Appointment ${appointment._id.toString()} status updated to: ${appointment.status}`,
@@ -148,7 +176,15 @@ export class NotificationListenerService implements OnModuleInit {
     // the admin is only interested in the creation
     // let adminMessage: string | null = null;
 
-    if (rescheduled) {
+    const latest = transition ?? appointment.history?.[appointment.history.length - 1];
+    const patientRequested = rescheduled && !appointment.rescheduleProposal && appointment.status === AppointmentStatus.PENDING && latest?.actorRole === 'user';
+    if (appointment.rescheduleProposal && appointment.status === AppointmentStatus.PENDING) {
+      patientMessage = 'The clinic proposed a new appointment time. Sign in to accept, request another time, or cancel before the proposed start. An unanswered proposal will automatically cancel.';
+      dentistMessage = `The proposed schedule for ${patientName} is awaiting the patient response.`;
+    } else if (patientRequested) {
+      patientMessage = 'Your requested appointment time is awaiting clinic review.';
+      dentistMessage = `${patientName} requested another appointment time. Please review the request.`;
+    } else if (rescheduled) {
       const date = new Date(appointment.date).toISOString().slice(0, 10);
       const schedule = `${date}, ${appointment.startTime}–${appointment.endTime}`;
       patientMessage = `Your appointment with Dr. ${dentistName} has been rescheduled to ${schedule} and is ${appointment.status}.`;
@@ -193,7 +229,7 @@ export class NotificationListenerService implements OnModuleInit {
       });
     }
 
-    if (dentistMessage) {
+    if (dentistMessage && latest?.actorId !== appointment.dentist._id.toString()) {
       notificationsToCreate.push({
         recipient: appointment.dentist._id.toString(),
         message: dentistMessage,
@@ -203,17 +239,12 @@ export class NotificationListenerService implements OnModuleInit {
       });
     }
 
-    // if (adminMessage) {
-    //   const admins = await this.userService.notificationStaffRecipients();
-    //   admins.forEach((admin) => {
-    //     notificationsToCreate.push({
-    //       recipient: admin._id.toString(),
-    //       message: adminMessage,
-    //       type: NotificationType.APPOINTMENT_STATUS_UPDATED,
-    //       link: `/admin/appointment/details/${appointment._id.toString()}`,
-    //     });
-    //   });
-    // }
+    if (patientRequested) {
+      const admins = await this.userService.notificationStaffRecipients(appointment.clinic.toString());
+      for (const admin of admins) notificationsToCreate.push({ recipient: admin._id.toString(), message: dentistMessage ?? 'Patient requested another time. Please review.',
+        type: NotificationType.APPOINTMENT_STATUS_UPDATED, appointment: appointment._id.toString(),
+        link: `/${admin.role === 'super-admin' ? 'super-admin' : 'admin'}/appointment/details/${appointment._id.toString()}` });
+    }
 
     if (notificationsToCreate.length > 0) {
       await this.notificationService.createMany(notificationsToCreate);

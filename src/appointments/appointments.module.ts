@@ -1,3 +1,5 @@
+import { ConfigModule } from '@nestjs/config';
+import { RescheduleExpiryService } from './reschedule-expiry.service';
 import { ClinicClosure, ClinicClosureSchema } from '../clinic-closures/entities/clinic-closure.entity';
 import { Referral, ReferralSchema } from '../referral/entities/referral.entity';
 import { AppointmentSchedulingService } from './appointment-scheduling.service';
@@ -18,7 +20,7 @@ import { AppointmentChangeEmail, AppointmentChangeEmailSchema } from '../appoint
 import { DentistDayAvailability, DentistDayAvailabilitySchema } from '../dentist-availability/entities/dentist-day-availability.entity';
 
 @Module({
-  imports: [
+  imports: [ConfigModule,
     MongooseModule.forFeature([
       { name: AppointmentChangeEmail.name, schema: AppointmentChangeEmailSchema },
       { name: Appointment.name, schema: AppointmentSchema },
@@ -33,7 +35,7 @@ import { DentistDayAvailability, DentistDayAvailabilitySchema } from '../dentist
     ]),
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsService, AppointmentSchedulingService],
+  providers: [AppointmentsService, AppointmentSchedulingService, RescheduleExpiryService],
   exports: [AppointmentsService, AppointmentSchedulingService],
 })
 export class AppointmentsModule {}

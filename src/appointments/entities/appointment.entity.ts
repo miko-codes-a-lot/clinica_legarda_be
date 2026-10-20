@@ -48,6 +48,21 @@ export class AppointmentDisruption {
 
 export type AppointmentDocument = HydratedDocument<Appointment>;
 
+@Schema({ _id: false })
+export class ProposalSchedule {
+  @Prop({ required: true }) date: string;
+  @Prop({ required: true }) startTime: string;
+  @Prop({ required: true }) endTime: string;
+}
+
+@Schema({ _id: false })
+export class RescheduleProposal {
+  @Prop({ required: true }) id: string;
+  @Prop({ required: true }) proposedAt: Date;
+  @Prop({ type: ProposalSchedule, required: true }) previousSchedule: ProposalSchedule;
+  @Prop({ required: true, maxlength: 500 }) reason: string;
+}
+
 @Schema({
   collection: 'appointments',
   timestamps: true,
@@ -85,6 +100,9 @@ export class Appointment {
     default: AppointmentStatus.PENDING,
   })
   status: AppointmentStatus;
+
+  @Prop({ default: 0 }) scheduleVersion: number;
+  @Prop({ type: RescheduleProposal }) rescheduleProposal?: RescheduleProposal;
 
   @Prop({ default: false })
   isWalkIn: boolean;

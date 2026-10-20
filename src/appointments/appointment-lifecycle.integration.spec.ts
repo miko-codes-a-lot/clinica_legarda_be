@@ -199,10 +199,11 @@ localTests('Appointment lifecycle', () => {
     const stored = await appointments.findById(created._id.toString());
     expect(stored?.createdBy?.toString()).toBe(fixture.patient);
     expect(stored?.history[0].actorId).toBe(fixture.patient);
-    await service.reschedule(created._id.toString(), { date, startTime: '15:00', endTime: '16:00' }, actor('dentist'));
-    expect((await appointments.findById(created._id.toString()))?.createdBy?.toString()).toBe(fixture.patient);
     await expect(service.cancel(created._id.toString(), actor('dentist'))).rejects.toBeInstanceOf(ForbiddenException);
-    await service.cancel(created._id.toString(), actor('user'), 'Plans changed');
+    const proposed = await service.reschedule(created._id.toString(), { date, startTime: '15:00', endTime: '16:00' }, actor('dentist'));
+    expect((await appointments.findById(created._id.toString()))?.createdBy?.toString()).toBe(fixture.patient);
+    await expect(service.cancel(created._id.toString(), actor('dentist'))).rejects.toBeInstanceOf(ConflictException);
+    await service.cancel(created._id.toString(), actor('user'), 'Plans changed', proposed.rescheduleProposal?.id);
   });
 
   it.each(['user', 'dentist', 'admin', 'super-admin'] as const)('allows only the %s creator to cancel, with no staff override', async role => {

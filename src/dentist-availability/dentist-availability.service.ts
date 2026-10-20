@@ -97,7 +97,7 @@ export class DentistAvailabilityService {
             $push: { history: { action: 'Appointment affected by dentist availability.', actorId: actor.sub, actorRole: actor.role, actorName: actor.username } },
           }, { session });
           await this.outbox.create([{ eventKey: `availability:${saved.id}:${saved.revision}:${row.id}`, appointment: row._id, patient: row.patient, clinic: row.clinic,
-            kind: 'disrupted', schedule: { date, startTime: row.startTime, endTime: row.endTime } }], { session });
+            kind: 'disrupted', scheduleVersion: row.scheduleVersion ?? 0, schedule: { date, startTime: row.startTime, endTime: row.endTime } }], { session });
           const recipient = await findPatientRecipient(this.users, row.patient, session);
           const created = await this.notices.insertMany([
             ...(recipient ? [{ recipient: recipient.id, appointment: row._id, type: NotificationType.APPOINTMENT_STATUS_UPDATED, message: `${recipient.patientName ? recipient.patientName + ': ' : ''}Dentist availability affects your appointment. Contact the clinic to review the schedule.`, link: '/app/my-appointment' }] : []),

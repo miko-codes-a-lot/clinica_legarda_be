@@ -148,4 +148,17 @@ describe('OTP email identity', () => {
     mockGmail.sendingPausedUntil = 'not-a-date';
     expect(() => new MailerService()).toThrow();
   });
+  it('asks for patient agreement in the proposal, then confirms only the accepted revised schedule',async()=>{
+    const change={clinicName:'Test Clinic',clinicAddress:'',date:'2026-10-26',startTime:'11:00',endTime:'11:30',changedAt:new Date('2026-10-20'),
+      previousSchedule:{date:'2026-10-26',startTime:'09:00',endTime:'09:30'},reason:'Dentist schedule changed'};
+    await new MailerService().sendAppointmentChange('patient@clinic-mail.ph',{...change,kind:'rescheduled',responseRequired:true});
+    const proposal=Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw,'base64url').toString('utf8');
+    expect(proposal).toContain('accept');expect(proposal).toContain('automatically cancel');expect(proposal).not.toContain('Check in by');
+    expect(proposal).toContain('Previous schedule');expect(proposal).toContain('Revised schedule');
+    await new MailerService().sendAppointmentChange('patient@clinic-mail.ph',{...change,kind:'confirmed'});
+    const accepted=Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw,'base64url').toString('utf8');
+    expect(accepted).toContain('Your revised appointment is confirmed');expect(accepted).toContain('agreement');
+    expect(accepted).toContain('11:20 AM');expect(accepted).not.toContain('not confirmed until');
+  });
+
 });

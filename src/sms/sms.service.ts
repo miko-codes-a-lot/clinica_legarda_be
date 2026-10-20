@@ -49,8 +49,13 @@ export class SmsService {
 
   async sendAppointmentChange(to: string, change: AppointmentChangeMessage): Promise<void> {
     this.ensureSendingAvailable(to);
-    const { heading, message } = COPY[change.kind];
-    const rescheduled = change.kind === 'rescheduled';
+    const confirmedReschedule = change.kind === 'confirmed' && !!change.previousSchedule;
+    const { heading, message } = change.responseRequired ? {
+      heading: 'Please respond to your proposed appointment schedule',
+      message: 'The clinic proposed a new time. Sign in to My appointments to accept, request another time, or cancel. It is not confirmed until you agree. No response before the proposed start means automatic cancellation.',
+    } : confirmedReschedule ? { heading: 'Your revised appointment is confirmed',
+      message: 'Your agreement to the clinic-proposed time has been recorded. Your revised appointment is confirmed.' } : COPY[change.kind];
+    const rescheduled = change.kind === 'rescheduled' || confirmedReschedule;
     const lines = [CLINIC_NAME, heading, message];
     if (change.patientName) lines.push(`Patient: ${change.patientName}`);
     lines.push(`Clinic: ${change.clinicName}`);
