@@ -10,8 +10,6 @@ import { Clinic, ClinicSchema } from '../clinics/entities/clinic.entity';
 import { DentalCatalog, DentalCatalogSchema } from '../dental-catalog/entities/dental-catalog.entity';
 import { Referral, ReferralSchema } from '../referral/entities/referral.entity';
 import { MailerService } from '../mailer/mailer.service';
-import { SmsService } from '../sms/sms.service';
-import { AppointmentChangeSmsService } from './appointment-change-sms.service';
 
 const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
 (uri ? describe : describe.skip)('Transactional patient appointment-change mail', () => {
@@ -25,9 +23,6 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
   let service: AppointmentsService;
   let fixture: { patient: string; dentist: string; clinic: string; service: string };
   const send = jest.fn<Promise<void>, Parameters<MailerService['sendAppointmentChange']>>();
-  const text = jest.fn<Promise<void>, Parameters<SmsService['sendAppointmentChange']>>();
-  const textWorker = () => new AppointmentChangeSmsService(outbox, users, clinics,
-    { sendAppointmentChange: text } as unknown as SmsService, new ConfigService(), appointments);
   const worker = () => new AppointmentChangeEmailsService(outbox, users, clinics,
     { sendAppointmentChange: send } as unknown as MailerService, new ConfigService(), appointments);
   const actor = () => ({ sub: fixture.dentist, role: 'dentist', username: 'Doctor' });
@@ -47,10 +42,10 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
   });
   beforeEach(async () => {
     await Promise.all([appointments.deleteMany({}), outbox.deleteMany({}), users.deleteMany({}), clinics.deleteMany({}), catalog.deleteMany({}), referrals.deleteMany({})]);
-    send.mockReset().mockResolvedValue(undefined); text.mockReset().mockResolvedValue(undefined);
+    send.mockReset().mockResolvedValue(undefined);
     const hours = ['monday', 'tuesday'].map(day => ({ day, startTime: '09:00', endTime: '16:00' }));
     const clinic = await clinics.create({ name: 'Email test clinic', address: 'Test address', operatingHours: hours });
-    const patient = await users.create({ role: 'user', status: 'confirmed', emailAddress: 'patient@clinic-mail.ph', mobileNumber: '+639171234567' });
+    const patient = await users.create({ role: 'user', status: 'confirmed', emailAddress: 'patient@clinic-mail.ph' });
     const dentist = await users.create({ role: 'dentist', status: 'confirmed', clinics: [clinic._id], operatingHours: hours });
     const treatment = await catalog.create({ name: 'Test treatment', duration: 30, clinics: [clinic._id] });
     fixture = { patient: patient.id, dentist: dentist.id, clinic: clinic.id, service: treatment.id };
@@ -60,34 +55,18 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
   afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
   afterAll(async () => { await db?.dropDatabase(); await db?.close(); });
 
-  it('waits for staff approval then delivers one combined email and text across workers and restarts', async () => {
-    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'performance', 'queueMicrotask'] });
-    jest.setSystemTime(new Date('2026-10-18T00:00:00Z'));
+  it('commits one reschedule snapshot with previous/new schedule and delivers once across workers/restarts', async () => {
     const appointment = await book();
-    await service.approve(appointment.id, actor());
-    await outbox.deleteMany({}); // The original booking confirmation is unrelated to its subsequent change.
-    const revised = await service.reschedule(appointment.id, reschedule, actor());
-    expect(revised.status).toBe('pending');
-    expect(JSON.parse(JSON.stringify(revised))).not.toHaveProperty('pendingRescheduleNotice');
-    expect(await outbox.countDocuments()).toBe(0);
-    await worker().sendPending(); await textWorker().sendPending();
-    expect(send).not.toHaveBeenCalled(); expect(text).not.toHaveBeenCalled();
-    jest.setSystemTime(new Date('2026-10-19T00:00:00Z')); // Approval can be a day later; SMS age starts at approval.
-    await service.approve(appointment.id, actor());
-    await expect(service.approve(appointment.id, actor())).rejects.toThrow();
+    await service.reschedule(appointment.id, reschedule, actor());
     expect(await outbox.countDocuments()).toBe(1);
     const queued = await outbox.findOne();
-    expect(queued?.toObject()).toMatchObject({ kind: 'confirmed', reason: 'Clinic schedule changed',
+    expect(queued?.toObject()).toMatchObject({ kind: 'rescheduled', reason: 'Clinic schedule changed',
       previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' },
       schedule: { date: '2026-10-20', startTime: '11:00', endTime: '11:30' } });
-    await Promise.all([worker().sendPending(), worker().sendPending(), textWorker().sendPending(), textWorker().sendPending()]);
-    await worker().sendPending(); await textWorker().sendPending();
-    for (const channel of [send, text]) {
-      expect(channel).toHaveBeenCalledTimes(1);
-      expect(channel.mock.calls[0][1]).toMatchObject({ kind: 'confirmed', reason: 'Clinic schedule changed',
-        previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' },
-        date: '2026-10-20', startTime: '11:00', arrivalDeadline: new Date('2026-10-20T03:20:00Z') });
-    }
+    await Promise.all([worker().sendPending(), worker().sendPending()]);
+    await worker().sendPending();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toMatchObject(['patient@clinic-mail.ph', { kind: 'rescheduled', clinicName: 'Email test clinic', date: '2026-10-20' }]);
   });
 
   it('persists rejection mail only for a successful staff decision', async () => {
@@ -151,77 +130,29 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     expect(await outbox.countDocuments()).toBe(0);
   });
 
-  it('keeps the original patient-visible schedule across multiple staff changes and note edits', async () => {
+  it('delivers a staff reschedule even when it is confirmed before the notice worker runs', async () => {
     jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
     const appointment = await book();
     await service.reschedule(appointment.id, reschedule, actor());
-    await service.reschedule(appointment.id, { ...reschedule, startTime: '12:00', endTime: '12:30', reason: 'Final adjustment' }, actor());
-    await service.update(appointment.id, { ...fixture, services: [fixture.service], date: reschedule.date,
-      startTime: '12:00', endTime: '12:30', notes: { clinicNotes: 'PRIVATE CLINICAL NOTE' } }, actor());
-    await service.update(appointment.id, { ...fixture, services: [fixture.service], date: reschedule.date,
-      startTime: '13:00', endTime: '13:30' }, actor());
     await service.approve(appointment.id, actor());
     await worker().sendPending();
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][1]).toMatchObject({ kind: 'confirmed', startTime: '13:00', reason: 'Final adjustment',
-      previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' } });
-    expect(JSON.stringify(await outbox.findOne())).not.toContain('PRIVATE CLINICAL NOTE');
+    await worker().sendPending();
+    expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({
+      kind: 'rescheduled', reason: reschedule.reason,
+      previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' },
+    }));
+    expect(send.mock.calls.filter(([, notice]) => notice.kind === 'rescheduled')).toHaveLength(1);
+    expect(await outbox.countDocuments({ kind: 'rescheduled', sentAt: { $exists: true } })).toBe(1);
   });
 
-  it('uses ordinary confirmation when a patient changes a schedule after staff', async () => {
-    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
-    const appointment = await book();
-    await service.reschedule(appointment.id, reschedule, actor());
-    await service.reschedule(appointment.id, { ...reschedule, startTime: '12:00', endTime: '12:30', reason: 'Patient request' },
-      { sub: fixture.patient, role: 'user' });
-    await service.approve(appointment.id, actor());
-    await worker().sendPending(); await textWorker().sendPending();
-    for (const channel of [send, text]) {
-      expect(channel).toHaveBeenCalledTimes(1);
-      expect(channel.mock.calls[0][1]).toMatchObject({ kind: 'confirmed', startTime: '12:00' });
-      expect(channel.mock.calls[0][1].previousSchedule).toBeUndefined();
-      expect(channel.mock.calls[0][1].reason).toBeUndefined();
-    }
-  });
-
-  it('defers a staff schedule edit until approval and preserves both schedules without clinical notes', async () => {
+  it('also queues a staff edit that changes a pending appointment schedule without copying clinical notes', async () => {
     const appointment = await book();
     await service.update(appointment.id, { ...fixture, services: [fixture.service], date: reschedule.date,
       startTime: reschedule.startTime, endTime: reschedule.endTime, notes: { clinicNotes: 'PRIVATE CLINICAL NOTE' } }, actor());
-    expect(await outbox.countDocuments()).toBe(0);
-    await service.approve(appointment.id, actor());
-    const queued = await outbox.findOne();
-    expect(queued?.toObject()).toMatchObject({ kind: 'confirmed', schedule: { date: '2026-10-20' },
-      previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' } });
-    expect(JSON.stringify(queued)).not.toContain('PRIVATE CLINICAL NOTE');
-  });
-
-  it('sends only a rejection if a staff reschedule is declined instead of approved', async () => {
-    const appointment = await book();
-    await service.reschedule(appointment.id, reschedule, actor());
-    await service.reject(appointment.id, actor(), 'No longer available');
-    await worker().sendPending(); await textWorker().sendPending();
-    for (const channel of [send, text]) {
-      expect(channel).toHaveBeenCalledTimes(1);
-      expect(channel.mock.calls[0][1]).toMatchObject({ kind: 'rejected' });
-      expect(channel.mock.calls[0][1].previousSchedule).toBeUndefined();
-    }
     expect(await outbox.countDocuments()).toBe(1);
-  });
-
-  it.each([false, true])('does not copy the former patient schedule/reason when reassigned (time changed: %s)', async (changeTime) => {
-    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
-    const appointment = await book();
-    await service.reschedule(appointment.id, reschedule, actor());
-    const replacement = await users.create({ role: 'user', status: 'confirmed', emailAddress: 'replacement@clinic-mail.ph' });
-    const admin = { sub: fixture.dentist, role: 'super-admin' };
-    await service.update(appointment.id, { ...fixture, patient: replacement.id, services: [fixture.service], date: reschedule.date,
-      startTime: changeTime ? '12:00' : '11:00', endTime: changeTime ? '12:30' : '11:30' }, admin);
-    await service.approve(appointment.id, admin); await worker().sendPending();
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][0]).toBe('replacement@clinic-mail.ph');
-    expect(send.mock.calls[0][1].previousSchedule).toBeUndefined();
-    expect(send.mock.calls[0][1].reason).toBeUndefined();
+    const queued = await outbox.findOne();
+    expect(queued?.schedule.date).toBe('2026-10-20');
+    expect(JSON.stringify(queued)).not.toContain('PRIVATE CLINICAL NOTE');
   });
 
   it('does not email an unchanged schedule when staff only edit appointment notes', async () => {
@@ -231,20 +162,14 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     expect(await outbox.countDocuments()).toBe(0);
   });
 
-  it('retains the pending reschedule for retry if approval and its combined notice roll back', async () => {
-    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
+  it('rolls back the appointment when its transactional email snapshot cannot be stored', async () => {
     const appointment = await book();
-    await service.reschedule(appointment.id, reschedule, actor());
     const store = jest.spyOn(outbox, 'create').mockRejectedValueOnce(new Error('Outbox write failure'));
-    await expect(service.approve(appointment.id, actor())).rejects.toThrow('Outbox write failure');
+    await expect(service.reschedule(appointment.id, reschedule, actor())).rejects.toThrow('Outbox write failure');
     store.mockRestore();
     const current = await appointments.findById(appointment._id);
-    expect(current?.status).toBe('pending'); expect(current?.history).toHaveLength(1);
-    expect(await outbox.countDocuments()).toBe(0);
-    await service.approve(appointment.id, actor()); await worker().sendPending();
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][1]).toMatchObject({ kind: 'confirmed', reason: 'Clinic schedule changed',
-      previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' } });
+    expect(current?.date.toISOString()).toBe('2026-10-19T00:00:00.000Z');
+    expect(current?.startTime).toBe('09:30'); expect(current?.history).toHaveLength(0);
   });
 
   it('retries a failed delivery after its delay, retaining the event snapshot', async () => {

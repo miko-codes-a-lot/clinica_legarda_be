@@ -46,20 +46,6 @@ export class AppointmentDisruption {
   @Prop({ required: true }) message: string;
 }
 
-@Schema({ _id: false })
-export class RescheduleNoticeSchedule {
-  @Prop({ required: true }) date: string;
-  @Prop({ required: true }) startTime: string;
-  @Prop({ required: true }) endTime: string;
-}
-
-/** Retained until clinic approval, when one final confirmation is queued. */
-@Schema({ _id: false })
-export class PendingRescheduleNotice {
-  @Prop({ type: RescheduleNoticeSchedule }) previousSchedule?: RescheduleNoticeSchedule;
-  @Prop({ trim: true, maxlength: 500 }) reason?: string;
-}
-
 export type AppointmentDocument = HydratedDocument<Appointment>;
 
 @Schema({
@@ -108,9 +94,6 @@ export class Appointment {
 
   @Prop({ type: AppointmentDisruption })
   disruption?: AppointmentDisruption;
-
-  @Prop({ type: PendingRescheduleNotice, select: false })
-  pendingRescheduleNotice?: PendingRescheduleNotice;
 
   @Prop({ type: AppointmentNote, default: () => ({}) })
   notes: AppointmentNote;
