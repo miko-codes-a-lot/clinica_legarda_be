@@ -26,8 +26,14 @@ export class AppointmentChangeEmail {
   @Prop() skippedAt?: Date;
   @Prop() lockedUntil?: Date;
   @Prop() leaseToken?: string;
+  /** Text-message delivery of the same event, tracked apart from email so neither channel blocks the other. */
+  @Prop() smsSentAt?: Date;
+  @Prop() smsSkippedAt?: Date;
+  @Prop() smsLockedUntil?: Date;
+  @Prop() smsLeaseToken?: string;
   createdAt: Date;
 }
 export const AppointmentChangeEmailSchema = SchemaFactory.createForClass(AppointmentChangeEmail);
 AppointmentChangeEmailSchema.index({ sentAt: 1, skippedAt: 1, lockedUntil: 1, createdAt: 1 });
+AppointmentChangeEmailSchema.index({ smsSentAt: 1, smsSkippedAt: 1, smsLockedUntil: 1, createdAt: 1 });
 AppointmentChangeEmailSchema.index({ eventKey: 1 }, { unique: true, sparse: true });

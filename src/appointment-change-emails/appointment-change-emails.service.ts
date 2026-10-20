@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { isEmailRecipient } from '../mailer/email-recipient';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { reservationDeadline } from '../appointments/appointment-time';
+import { changeStillApplies, NEEDS_CURRENT_APPOINTMENT } from './appointment-change-validity';
 
 @Injectable()
 export class AppointmentChangeEmailsService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -55,15 +56,9 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
       if (!claimed) continue;
       const claim = { _id: claimed._id, leaseToken };
       try {
-        if (['confirmed', 'rescheduled', 'disrupted'].includes(claimed.kind)) {
+        if (NEEDS_CURRENT_APPOINTMENT.includes(claimed.kind)) {
           const current = await this.appointments.findById(claimed.appointment).exec();
-          const valid = current && current.date.toISOString().slice(0, 10) === claimed.schedule.date &&
-            current.startTime === claimed.schedule.startTime && current.endTime === claimed.schedule.endTime &&
-            current.patient.toString() === claimed.patient.toString() && current.clinic.toString() === claimed.clinic.toString() &&
-            (claimed.kind === 'confirmed' ? current.status === 'confirmed' && !current.disruption &&
-              reservationDeadline(current.date, current.startTime).getTime() > Date.now()
-              : claimed.kind === 'rescheduled' ? current.status === 'pending' : !!current.disruption && ['pending', 'confirmed'].includes(current.status));
-          if (!valid) {
+          if (!changeStillApplies(claimed, current)) {
             await this.outbox.updateOne(claim, { $set: { skippedAt: new Date() }, $unset: { leaseToken: 1, lockedUntil: 1 } }).exec();
             continue;
           }

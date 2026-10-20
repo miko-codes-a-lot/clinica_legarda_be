@@ -1,4 +1,4 @@
-import { patientRecipient, PatientRecipientSource, PATIENT_RECIPIENT_FIELDS, GUARDIAN_RECIPIENT_FIELDS } from '../users/patient-recipient';
+import { patientRecipient, PatientNoticeRecipient, PatientRecipientSource, PATIENT_RECIPIENT_FIELDS, GUARDIAN_RECIPIENT_FIELDS } from '../users/patient-recipient';
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -18,20 +18,55 @@ const MANILA_OFFSET = 8 * 60 * 60 * 1000;
 const RETRY_DELAY = 10 * 60 * 1000;
 type Recipient = PatientRecipientSource;
 type Location = Pick<Clinic, 'name' | 'address'> & { _id: Types.ObjectId };
-type PopulatedAppointment = Omit<Appointment, 'patient' | 'clinic'> & {
+export type PopulatedAppointment = Omit<Appointment, 'patient' | 'clinic'> & {
   _id: Types.ObjectId; patient: Recipient | null; clinic: Location | null;
 };
+/** Whether the notice recipient can be reached on a channel; email and text reminders differ only in this. */
+export type Reachable = (recipient: PatientNoticeRecipient | null) => boolean;
+const emailReachable: Reachable = recipient => isEmailRecipient(recipient?.emailAddress);
 
 function startsAt(appointment: Pick<Appointment, 'date' | 'startTime'>): number {
   try { return appointmentStart(appointment.date, appointment.startTime).getTime(); }
   catch { return NaN; }
 }
 
-function due(appointment: PopulatedAppointment, now: number): boolean {
+export function due(appointment: PopulatedAppointment, now: number, reachable: Reachable = emailReachable): boolean {
   const start = startsAt(appointment);
   return appointment.status === AppointmentStatus.CONFIRMED && !appointment.disruption &&
     start > now && start <= now + DAY && !!appointment.clinic &&
-    isEmailRecipient(patientRecipient(appointment.patient)?.emailAddress);
+    reachable(patientRecipient(appointment.patient));
+}
+
+/** Confirmed, undisrupted appointments starting today or tomorrow (Manila), with their notice recipient and clinic. */
+export async function findReminderCandidates(appointments: Model<Appointment>, now: number): Promise<PopulatedAppointment[]> {
+  const localDay = new Date(now + MANILA_OFFSET).toISOString().slice(0, 10);
+  const day = new Date(`${localDay}T00:00:00Z`);
+  return appointments.find({
+    status: AppointmentStatus.CONFIRMED,
+    date: { $gte: day, $lt: new Date(day.getTime() + 2 * DAY) },
+    disruption: { $exists: false },
+  }).select('date startTime endTime status patient clinic disruption')
+    .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
+    .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
+}
+
+/** One reminder per appointment schedule, patient and clinic: a changed schedule is reminded again. */
+export function reminderKey(appointment: PopulatedAppointment): string {
+  return createHash('sha256').update(JSON.stringify([
+    appointment._id, appointment.date.toISOString().slice(0, 10), appointment.startTime,
+    appointment.endTime, appointment.patient?._id, appointment.clinic?._id,
+  ])).digest('hex');
+}
+
+/** The appointment as it is now, only if it still has the scanned schedule, patient and clinic and is still confirmed. */
+export function findCurrentReminderAppointment(appointments: Model<Appointment>, appointment: PopulatedAppointment): Promise<PopulatedAppointment | null> {
+  return appointments.findOne({
+    _id: appointment._id, date: appointment.date, startTime: appointment.startTime,
+    endTime: appointment.endTime, patient: appointment.patient?._id, clinic: appointment.clinic?._id,
+    status: AppointmentStatus.CONFIRMED, disruption: { $exists: false },
+  }).select('date startTime endTime status patient clinic disruption')
+    .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
+    .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
 }
 
 @Injectable()
@@ -68,26 +103,14 @@ export class AppointmentRemindersService implements OnApplicationBootstrap, OnMo
   }
 
   async sendDueReminders(): Promise<void> {
-    const now = Date.now();
-    const localDay = new Date(now + MANILA_OFFSET).toISOString().slice(0, 10);
-    const day = new Date(`${localDay}T00:00:00Z`);
-    const candidates = await this.appointments.find({
-      status: AppointmentStatus.CONFIRMED,
-      date: { $gte: day, $lt: new Date(day.getTime() + 2 * DAY) },
-      disruption: { $exists: false },
-    }).select('date startTime endTime status patient clinic disruption')
-      .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
-      .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
+    const candidates = await findReminderCandidates(this.appointments, Date.now());
     for (const appointment of candidates) {
       if (due(appointment, Date.now())) await this.deliver(appointment);
     }
   }
 
   private async deliver(appointment: PopulatedAppointment): Promise<void> {
-    const key = createHash('sha256').update(JSON.stringify([
-      appointment._id, appointment.date.toISOString().slice(0, 10), appointment.startTime,
-      appointment.endTime, appointment.patient?._id, appointment.clinic?._id,
-    ])).digest('hex');
+    const key = reminderKey(appointment);
     const leaseToken = randomUUID();
     const now = new Date();
     try {
@@ -106,13 +129,7 @@ export class AppointmentRemindersService implements OnApplicationBootstrap, OnMo
     try {
       // Changes after the scan (including rescheduling/cancellation or changed
       // contacts) must not cause a reminder for the stale appointment snapshot.
-      const current = await this.appointments.findOne({
-        _id: appointment._id, date: appointment.date, startTime: appointment.startTime,
-        endTime: appointment.endTime, patient: appointment.patient?._id, clinic: appointment.clinic?._id,
-        status: AppointmentStatus.CONFIRMED, disruption: { $exists: false },
-      }).select('date startTime endTime status patient clinic disruption')
-        .populate<{ patient: Recipient | null }>({ path: 'patient', select: PATIENT_RECIPIENT_FIELDS, populate: { path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS } })
-        .populate<{ clinic: Location | null }>('clinic', 'name address').exec();
+      const current = await findCurrentReminderAppointment(this.appointments, appointment);
       if (!current || !due(current, Date.now()) || !current.patient || !current.clinic) {
         await this.reminders.deleteOne(claim).exec();
         return;
