@@ -1,3 +1,4 @@
+import { AppointmentChangeEmail, AppointmentChangeEmailSchema } from '../appointment-change-emails/entities/appointment-change-email.entity';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Clinic, ClinicSchema } from '../clinics/entities/clinic.entity';
@@ -8,6 +9,6 @@ import { ClinicClosure, ClinicClosureSchema } from './entities/clinic-closure.en
 import { ClinicClosuresController } from './clinic-closures.controller';
 import { ClinicClosuresService } from './clinic-closures.service';
 @Module({ imports: [MongooseModule.forFeature([{ name: Clinic.name, schema: ClinicSchema }, { name: Appointment.name, schema: AppointmentSchema },
-  { name: User.name, schema: UserSchema }, { name: Notification.name, schema: NotificationSchema }, { name: ClinicClosure.name, schema: ClinicClosureSchema }])],
+  { name: AppointmentChangeEmail.name, schema: AppointmentChangeEmailSchema }, { name: User.name, schema: UserSchema }, { name: Notification.name, schema: NotificationSchema }, { name: ClinicClosure.name, schema: ClinicClosureSchema }])],
   controllers: [ClinicClosuresController], providers: [ClinicClosuresService] })
 export class ClinicClosuresModule {}

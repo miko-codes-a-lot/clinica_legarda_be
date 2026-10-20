@@ -148,10 +148,7 @@ export class AuthService {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = new Date(Date.now() + 1000 * 60 * 5); // 5 minutes
 
-    user.resetOtp = otp;
-    user.resetOtpExpires = expiry;
-    user.resetOtpVerified = false;
-    await user.save();
+    if (!await this.userService.issueResetOtp(user, otp, expiry)) return;
 
     try {
       await sendViaSemaphore(
@@ -176,8 +173,7 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired OTP');
     }
 
-    user.resetOtpVerified = true;
-    await user.save();
+    if (!await this.userService.verifyResetOtpState(user, otp)) throw new BadRequestException('Invalid or expired OTP');
   }
 
   // 3. Reset password with verified OTP
@@ -193,10 +189,7 @@ export class AuthService {
       throw new BadRequestException('OTP not verified');
     }
 
-    user.password = await bcrypt.hash(newPassword, 10);
-    user.resetOtp = undefined;
-    user.resetOtpExpires = undefined;
-    user.resetOtpVerified = false;
-    await user.save();
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    if (!await this.userService.completePasswordReset(user, passwordHash)) throw new BadRequestException('OTP not verified or account unavailable');
   }
 }

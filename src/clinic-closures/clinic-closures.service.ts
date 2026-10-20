@@ -1,6 +1,8 @@
+import { activePatientScope, requireActivePatient } from '../users/patient-visibility';
+import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
 import { findPatientRecipient } from '../users/patient-recipient';
 import { CreateNotificationDto } from '../notifications/dto/create-notification.dto';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -23,6 +25,7 @@ export class ClinicClosuresService implements OnModuleInit {
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Notification.name) private readonly notifications: Model<Notification>,
     private readonly events: EventEmitter2,
+    @Optional() @InjectModel(AppointmentChangeEmail.name) private readonly outbox?: Model<AppointmentChangeEmail>,
   ) {}
   async onModuleInit() { await this.closures.init(); }
   private staff(actor: UserActor, clinic?: string) {
@@ -39,13 +42,13 @@ export class ClinicClosuresService implements OnModuleInit {
     return [person.firstName, person.lastName].filter(Boolean).join(' ') || person.username;
   }
   private async affected(dto: ClinicClosureDto, session?: ClientSession) {
-    const candidates = await this.appointments.find({ clinic: referenceId(dto.clinic), status: { $in: ['pending', 'confirmed'] },
+    const candidates = await this.appointments.find({ ...await activePatientScope(this.users, session), clinic: referenceId(dto.clinic), status: { $in: ['pending', 'confirmed'] },
       date: { $gte: new Date(`${dto.startDate}T00:00:00Z`), $lt: new Date(Date.parse(`${dto.endDate}T00:00:00Z`) + 86400000) },
     }).session(session ?? null).exec();
     return candidates.filter(row => closureOverlaps(dto, row.date.toISOString().slice(0,10), row.startTime, row.endTime));
   }
-  private appointmentRows(ids: unknown[], actor: UserActor, clinic: string) {
-    return this.appointments.find({ $and: [{ _id: { $in: ids }, clinic: referenceId(clinic) }, this.scope(actor)] }).select('_id patient dentist clinic date startTime endTime status disruption')
+  private async appointmentRows(ids: unknown[], actor: UserActor, clinic: string) {
+    return this.appointments.find({ ...await activePatientScope(this.users), $and: [{ _id: { $in: ids }, clinic: referenceId(clinic) }, this.scope(actor)] }).select('_id patient dentist clinic date startTime endTime status disruption')
       .populate([{ path: 'patient', select: '_id firstName lastName username' }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }, { path: 'clinic', select: CARE_CLINIC_FIELDS }]).sort({ date: 1, startTime: 1 }).lean().exec();
   }
   async preview(actor: UserActor, dto: ClinicClosureDto) {
@@ -68,6 +71,12 @@ export class ClinicClosuresService implements OnModuleInit {
             $set: { disruption: { closures: [...(row.disruption?.closures ?? []), closure._id], dentistAvailability: row.disruption?.dentistAvailability ?? [], flaggedAt: now, message: 'Clinic or dentist availability affects this appointment. Contact the clinic to arrange the next step.' } },
             $push: { history: { action: 'Appointment affected by clinic closure.', actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } },
           }, { session });
+          if (this.outbox) await this.outbox.create([{
+            eventKey: `closure:${closure.id}:${row.id}`, appointment: row._id, patient: row.patient, clinic: row.clinic,
+            kind: 'disrupted', scheduleVersion: row.scheduleVersion ?? 0,
+            schedule: { date: row.date.toISOString().slice(0, 10), startTime: row.startTime, endTime: row.endTime },
+            reason: closure.reason,
+          }], { session });
         }
         const notices: CreateNotificationDto[] = [];
         for (const row of rows) {
@@ -109,6 +118,7 @@ export class ClinicClosuresService implements OnModuleInit {
       await this.lock(referenceId(initial.clinic), session);
       const current = await this.appointments.findById(initial._id).session(session);
       if (!current?.disruption) throw new ConflictException('This appointment has no unresolved closure flag.');
+      await requireActivePatient(this.users, current.patient, session);
       const active = await this.closures.find({ clinic: referenceId(current.clinic), status: 'active' }).session(session);
       assertOpenInterval(active, current.date.toISOString().slice(0,10), current.startTime, current.endTime);
       await this.appointments.updateOne({ _id: current._id }, {

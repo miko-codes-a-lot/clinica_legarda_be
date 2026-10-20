@@ -1,3 +1,4 @@
+import { User, UserSchema } from '../users/entities/user.entity';
 import { Module } from '@nestjs/common';
 import { ReferralsService } from './referrals.service';
 import { ReferralsController } from './referrals.controller';
@@ -9,6 +10,7 @@ import { AppointmentsModule } from '../appointments/appointments.module'
 @Module({
   imports: [
     MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
       { name: Referral.name, schema: ReferralSchema },
       { name: Appointment.name, schema: AppointmentSchema }, // <-- add this
     ]),

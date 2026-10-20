@@ -63,7 +63,7 @@ const uri = process.env.CLINICA_PANELIST_TEST_URI;
   });
   it.each(['waiting', 'in_progress', 'completed', 'cancelled'])('preserves appointments with a %s visit', async state => {
     const appointment = await book();
-    await db.collection('visits').insertOne({ appointment: appointment._id, state });
+    await db.collection('visits').insertOne({ appointment: appointment._id, date: '2026-10-21', state });
     expect(await worker().applyDueNoShows(now())).toBe(0);
     expect((await appointments.findById(appointment._id))?.status).toBe('confirmed');
   });
@@ -115,7 +115,7 @@ const uri = process.env.CLINICA_PANELIST_TEST_URI;
   });
   it('advances bounded scans past arrived appointments instead of starving later bookings', async () => {
     const arrived = await appointments.insertMany(Array.from({ length: 200 }, () => ({ ...f, services: [f.service], date: new Date('2026-10-21'), startTime: '09:00', endTime: '09:15', status: 'confirmed' })));
-    await db.collection('visits').insertMany(arrived.map(row => ({ appointment: row._id, state: 'completed' })));
+    await db.collection('visits').insertMany(arrived.map(row => ({ appointment: row._id, date: '2026-10-21', state: 'completed' })));
     const due = await book(), scanner = worker();
     expect(await scanner.applyDueNoShows(now())).toBe(0);
     expect(await scanner.applyDueNoShows(now())).toBe(1);

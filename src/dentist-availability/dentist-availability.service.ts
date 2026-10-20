@@ -1,3 +1,4 @@
+import { activePatientScope } from '../users/patient-visibility';
 import { findPatientRecipient } from '../users/patient-recipient';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -61,7 +62,7 @@ export class DentistAvailabilityService {
     return { current, intervals };
   }
   private async candidates(dentist: string, clinic: string, date: string, session?: ClientSession) {
-    const rows = await this.appointments.find({ dentist: referenceId(dentist), clinic: referenceId(clinic), date: new Date(date), status: { $in: ['pending', 'confirmed'] } })
+    const rows = await this.appointments.find({ ...await activePatientScope(this.users, session), dentist: referenceId(dentist), clinic: referenceId(clinic), date: new Date(date), status: { $in: ['pending', 'confirmed'] } })
       .session(session ?? null).exec();
     const visited = await this.visits.distinct('appointment', { appointment: { $in: rows.map(row => row._id) } }).session(session ?? null);
     return rows.filter(row => appointmentStart(row.date, row.startTime).getTime() > Date.now() && !visited.some(id => String(id) === row.id));

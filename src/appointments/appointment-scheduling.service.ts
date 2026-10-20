@@ -1,3 +1,4 @@
+import { activePatientScope, requireActivePatient } from '../users/patient-visibility';
 import { ClinicClosure } from '../clinic-closures/entities/clinic-closure.entity';
 import { assertOpenInterval } from '../clinic-closures/closure-rules';
 import { BadRequestException, Injectable } from '@nestjs/common';
@@ -57,6 +58,7 @@ export class AppointmentSchedulingService {
       clinic: schedulingReferenceId(input.clinic),
       services: [...new Set(input.services.map(schedulingReferenceId))],
     };
+    await requireActivePatient(this.users, request.patient, session);
     const locked = await this.clinics.updateOne({ _id: request.clinic }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
     if (!locked.matchedCount) throw new BadRequestException('Clinic no longer exists');
     if (this.closures) assertOpenInterval(await this.closures.find({ clinic: request.clinic, status: 'active' }).session(session), calendarDay(request.date).toISOString().slice(0,10), request.startTime, request.endTime);
@@ -66,6 +68,7 @@ export class AppointmentSchedulingService {
     const day = calendarDay(request.date);
     const nextDay = new Date(day.getTime() + 86400000);
     const appointments = await this.appointments.find({
+      ...await activePatientScope(this.users, session),
       ...(excludeId ? { _id: { $ne: excludeId } } : {}),
       $or: [{ dentist: request.dentist }, { patient: request.patient }],
       date: { $gte: day, $lt: nextDay },

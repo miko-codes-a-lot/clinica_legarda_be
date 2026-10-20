@@ -20,7 +20,7 @@ it('email OTP verification verifies login without approving the dentist for book
     otpVerifiedAt: undefined as Date | undefined,
   };
   const userModel = {
-    findById: () => ({ populate: () => Promise.resolve(stored) }),
+    findOne: () => ({ populate: () => Promise.resolve(stored) }),
     findOneAndUpdate: (
       _filter: unknown,
       update: { $set: Record<string, unknown> },

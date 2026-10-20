@@ -95,6 +95,12 @@ export class User {
   @Prop({ default: true })
   loginEnabled?: boolean;
 
+  @Prop({ index: true })
+  deletedAt?: Date;
+
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User', select: false })
+  deletedBy?: mongoose.Types.ObjectId;
+
   @Prop({ enum: ['email', 'guardian'] })
   verificationSource?: 'email' | 'guardian';
 

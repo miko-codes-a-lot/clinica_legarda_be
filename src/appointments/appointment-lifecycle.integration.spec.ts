@@ -179,6 +179,8 @@ localTests('Appointment lifecycle', () => {
     startTime: '14:00',
     endTime: '15:00',
   });
+  // Outcome success/atomicity cases must run after the appointment arrival grace.
+  const reachOutcomeTime = () => jest.mocked(Date.now).mockReturnValue(new Date('2026-09-21T01:20:00Z').getTime());
   const setStatus = async (status: Status) =>
     appointments.updateOne({ _id: fixture.appointment }, { $set: { status } });
 
@@ -271,6 +273,7 @@ localTests('Appointment lifecycle', () => {
   it.each(['complete', 'no-show'])(
     'exposes authenticated %s with a populated outcome response',
     async (outcome) => {
+      reachOutcomeTime();
       const route = `/appointments/${fixture.appointment}/${outcome}`;
       await request(app.getHttpServer()).patch(route).expect(401);
       await request(app.getHttpServer())
@@ -345,6 +348,7 @@ localTests('Appointment lifecycle', () => {
   it.each(['complete', 'noShow'] as const)(
     'allows %s for the owning dentist after membership removal, preserves history and adds attribution',
     async (outcome) => {
+      reachOutcomeTime();
       await users.updateOne(
         { _id: fixture.dentist },
         { $set: { clinics: [] } },
@@ -398,6 +402,7 @@ localTests('Appointment lifecycle', () => {
   it.each(['admin', 'super-admin'])(
     'allows %s oversight to record outcomes without requiring a reason',
     async (role) => {
+      reachOutcomeTime();
       const result = await service.complete(fixture.appointment, {
         ...admin,
         role, clinics: [fixture.clinic],
@@ -411,6 +416,7 @@ localTests('Appointment lifecycle', () => {
     },
   );
   it('keeps authorized clinical recordkeeping available after an outcome', async () => {
+    reachOutcomeTime();
     await service.complete(fixture.appointment, admin);
     await expect(
       service.updateDentistNotes(
@@ -435,6 +441,7 @@ localTests('Appointment lifecycle', () => {
   it.each(['noShow', 'complete', 'reschedule'] as const)(
     'serializes completion against %s through independent database connections',
     async (competing) => {
+      reachOutcomeTime();
       const other =
         competing === 'reschedule'
           ? () =>
@@ -476,6 +483,7 @@ localTests('Appointment lifecycle', () => {
   it.each(['complete', 'reschedule'] as const)(
     'rolls back %s and history if persistence fails after the conditional write',
     async (operation) => {
+      if (operation === 'complete') reachOutcomeTime();
       const before = await appointments.findById(fixture.appointment).lean();
       const original = appointments.findOneAndUpdate.bind(appointments);
       const failure = jest

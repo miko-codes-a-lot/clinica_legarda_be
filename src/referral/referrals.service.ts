@@ -1,12 +1,16 @@
+import { activePatientScope, requireActivePatient } from '../users/patient-visibility';
+import { User } from '../users/entities/user.entity';
 import { actorPatientIds } from '../auth/role-policy';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { ClientSession, Model } from 'mongoose';
 import { Referral } from './entities/referral.entity';
 import { ReferralUpsertDto } from './dto/referral-upsert.dto';
 import { Appointment } from '../appointments/entities/appointment.entity';
@@ -25,6 +29,7 @@ export class ReferralsService {
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
     private readonly appointmentService: AppointmentsService,
+    @Optional() @InjectModel(User.name) private readonly users?: Model<User>,
   ) {}
 
   async findAll(actor: UserActor, dentist?: string) {
@@ -43,8 +48,11 @@ export class ReferralsService {
           ],
         }
       : {};
+    // Legacy referrals can carry their patient only on the receiving appointment.
+    const patients = this.users ? await activePatientScope(this.users) : undefined;
+    const visible = patients ? { $or: [patients, { _id: { $in: await this.appointmentModel.distinct('referral', patients) } }] } : {};
     const records = await this.referralModel
-      .find({ $and: [filter, dentistFilter] })
+      .find({ $and: [filter, dentistFilter, visible] })
       .select('_id')
       .exec();
     return Promise.all(records.map((record) => this.findOne(record.id, actor)));
@@ -75,12 +83,13 @@ export class ReferralsService {
     };
   }
 
-  private async authorized(id: string, actor: UserActor, decision = false) {
-    const referral = await this.referralModel.findById(referenceId(id)).exec();
+  private async authorized(id: string, actor: UserActor, decision = false, session?: ClientSession) {
+    const referral = await this.referralModel.findById(referenceId(id)).session(session ?? null).exec();
     if (!referral) throw new NotFoundException('Referral not found.');
     const appointment = await this.appointmentModel
       .findOne({ referral: referral._id })
-      .exec();
+      .session(session ?? null).exec();
+    if (decision && this.users) await requireActivePatient(this.users, appointment?.patient ?? referral.patient, session);
     if (actor?.role === 'super-admin') return { referral, appointment };
     if (actor?.role === 'admin') {
       const source = canAccessClinic(actor, referral.fromClinicId);
@@ -109,6 +118,7 @@ export class ReferralsService {
   async findOne(id: string, actor: UserActor) {
     const { referral, appointment } = await this.authorized(id, actor);
     await referral.populate([
+      { path: 'patient', select: APPOINTMENT_PERSON_FIELDS },
       { path: 'fromDoctorId', select: APPOINTMENT_PERSON_FIELDS },
       { path: 'fromClinicId' },
     ]);
@@ -127,6 +137,7 @@ export class ReferralsService {
       : null;
     return {
       _id: referral._id,
+      patient: referral.patient,
       fromDoctorId: referral.fromDoctorId,
       fromClinicId: referral.fromClinicId,
       reason: referral.reason,
@@ -146,19 +157,19 @@ export class ReferralsService {
     if (id) {
       const { referral, appointment } = await this.authorized(id, actor);
       const patient = appointment?.patient ?? referral.patient;
+      if (this.users) await requireActivePatient(this.users, patient);
       if (
         !sameId(doc.fromDoctorId, referral.fromDoctorId) ||
         !sameId(doc.fromClinicId, referral.fromClinicId) ||
         (doc.patient && (!patient || !sameId(doc.patient, patient)))
       )
         throw new ForbiddenException('Referral identities cannot be changed.');
-      await this.referralModel
-        .findByIdAndUpdate(
-          id,
-          { $set: { ...(doc.reason !== undefined ? { reason: referralReason(doc.reason, referral.reason) } : {}) } },
-          { runValidators: true },
-        )
-        .exec();
+      await this.withPatientWrite(patient, async session => {
+        const current = await this.authorized(id, actor, false, session);
+        await this.referralModel.findByIdAndUpdate(id,
+          { $set: { ...(doc.reason !== undefined ? { reason: referralReason(doc.reason, current.referral.reason) } : {}) } },
+          { runValidators: true, session }).exec();
+      });
       return this.findOne(id, actor);
     }
     const patient =
@@ -172,6 +183,7 @@ export class ReferralsService {
       throw new BadRequestException('Select a patient for this referral.');
     if (!isAdmin(actor) && actor?.role !== 'user' && actor?.role !== 'dentist')
       throw new ForbiddenException('You cannot create referrals.');
+    if (this.users) await requireActivePatient(this.users, patient);
     const sourceDentist = referenceId(doc.fromDoctorId);
     const sourceClinic = referenceId(doc.fromClinicId);
     assertClinicAccess(actor, sourceClinic);
@@ -189,26 +201,33 @@ export class ReferralsService {
       throw new ForbiddenException(
         'Referring dentist and clinic must match the patient’s appointment history.',
       );
-    const referral = await this.referralModel.create({
-      patient,
-      createdBy: referenceId(actor.sub),
-      fromDoctorId: sourceDentist,
-      fromClinicId: sourceClinic,
-      reason: referralReason(doc.reason),
-      status: ReferralStatus.PENDING,
+    const referral = await this.withPatientWrite(patient, async session => {
+      const [created] = await this.referralModel.create([{
+        patient, createdBy: referenceId(actor.sub), fromDoctorId: sourceDentist, fromClinicId: sourceClinic,
+        reason: referralReason(doc.reason), status: ReferralStatus.PENDING,
+      }], { session });
+      return created;
     });
     return this.findOne(referral.id, actor);
   }
 
+  private async withPatientWrite<T>(patient: unknown, work: (session?: ClientSession) => Promise<T>): Promise<T> {
+    if (!this.users) return work(); // Existing direct-construction fixtures; production always injects UserModel.
+    const users = this.users;
+    return users.db.transaction(async session => {
+      const locked = await users.updateOne({ _id: referenceId(patient) }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
+      if (!locked.matchedCount) throw new ConflictException('Patient no longer exists.');
+      await requireActivePatient(users, patient, session);
+      return work(session);
+    });
+  }
+
   async approve(id: string, actor: UserActor) {
-    await this.authorized(id, actor, true);
-    await this.referralModel
-      .findByIdAndUpdate(
-        id,
-        { $set: { status: ReferralStatus.CONFIRMED } },
-        { runValidators: true },
-      )
-      .exec();
+    const { referral, appointment } = await this.authorized(id, actor, true);
+    await this.withPatientWrite(appointment?.patient ?? referral.patient, async session => {
+      await this.authorized(id, actor, true, session);
+      await this.referralModel.findByIdAndUpdate(id, { $set: { status: ReferralStatus.CONFIRMED } }, { runValidators: true, session }).exec();
+    });
     return this.findOne(id, actor);
   }
 

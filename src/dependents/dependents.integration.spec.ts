@@ -80,7 +80,9 @@ const uri = process.env.CLINICA_PANELIST_TEST_URI;
     await expect(bookings.cancel(String(booking._id), stale, 'Changed plans')).rejects.toThrow();
     await expect(bookings.create(payload(String(a._id), '10:00', '10:30'), stale)).rejects.toThrow();
     expect(await appointments.countDocuments()).toBe(1);
-    await expect(profiles.delete(String(a._id), { sub: other, role: 'super-admin' })).rejects.toThrow();
+    await profiles.delete(String(a._id), { sub: other, role: 'super-admin' });
+    expect((await users.findById(a._id))?.deletedAt).toBeInstanceOf(Date);
+    expect((await appointments.findById(booking._id))?.status).toBe('cancelled');
   });
   it('sends child approval, cancellation and reminders to the current parent only', async () => {
     const a = await child('Alice'), patient = String(a._id);

@@ -26,6 +26,7 @@ export class Visit {
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Clinic', required: true, index: true }) clinic: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'User', required: true, index: true }) dentist: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Appointment', index: true }) appointment?: Types.ObjectId;
+  @Prop({ min: 0 }) appointmentScheduleVersion?: number;
   @Prop({ unique: true, sparse: true, select: false }) appointmentKey?: string;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'TreatmentCase' }) careCase?: Types.ObjectId;
   @Prop({ required: true, index: true }) date: string;

@@ -15,6 +15,7 @@ import { assignedClinicIds } from '../users/clinic-membership';
 import { referenceId } from '../auth/reference-id';
 import { manilaDay } from '../care/visit-rules';
 import { isDueNoShow } from './no-show-rules';
+import { currentScheduleAttendance } from '../appointments/appointment-attendance';
 
 @Injectable()
 export class AppointmentNoShowsService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -64,7 +65,7 @@ export class AppointmentNoShowsService implements OnApplicationBootstrap, OnModu
           if (referenceId(current.patient) !== referenceId(candidate.patient) || referenceId(current.dentist) !== referenceId(candidate.dentist)) return false;
           const clinicId = referenceId(current.clinic), dentistId = referenceId(current.dentist);
           if (!(await this.clinics.updateOne({ _id: clinicId }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false })).matchedCount) return false;
-          if (await this.visits.exists({ appointment: current._id }).session(session)) return false;
+          if (await this.visits.exists(currentScheduleAttendance(current)).session(session)) return false;
           const clinic = await this.clinics.findById(clinicId).session(session), dentist = await this.users.findById(dentistId).session(session);
           if (!clinic || !dentist || dentist.status !== 'confirmed' || !assignedClinicIds(dentist).includes(clinicId)) return false;
           const date = current.date.toISOString().slice(0,10), day = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][current.date.getUTCDay()];

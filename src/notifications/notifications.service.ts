@@ -1,4 +1,6 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { activePatientScope } from '../users/patient-visibility';
+import { User } from '../users/entities/user.entity';
+import { ForbiddenException, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Notification } from './entities/notification.entity';
@@ -16,6 +18,7 @@ export class NotificationsService {
     private readonly eventEmitter: EventEmitter2,
     @InjectModel(Appointment.name)
     private readonly appointmentModel: Model<Appointment>,
+    @Optional() @InjectModel(User.name) private readonly users?: Model<User>,
   ) {}
 
   async create(createNotificationDto: CreateNotificationDto) {
@@ -31,7 +34,6 @@ export class NotificationsService {
     const notifications = await this.notificationModel
       .find({ recipient: referenceId(actor.sub) })
       .sort({ createdAt: -1 });
-    if (actor.role === 'super-admin') return notifications;
     const appointmentIds = notifications
       .map((notification) => this.associatedAppointmentId(notification))
       .filter((id): id is string => !!id);
@@ -40,6 +42,7 @@ export class NotificationsService {
           .find({
             _id: { $in: appointmentIds },
             ...appointmentScope(actor),
+            ...(this.users ? await activePatientScope(this.users) : {}),
           })
           .select('_id')
           .lean()
@@ -79,12 +82,12 @@ export class NotificationsService {
     actor: UserActor,
   ): Promise<boolean> {
     if (!sameId(notification.recipient, actor.sub)) return false;
-    if (actor.role === 'super-admin') return true;
     const appointmentId = this.associatedAppointmentId(notification);
     if (!appointmentId) return this.permitsUnassociated(notification, actor);
     return !!(await this.appointmentModel.exists({
       _id: appointmentId,
       ...appointmentScope(actor),
+      ...(this.users ? await activePatientScope(this.users) : {}),
     }));
   }
 
@@ -99,7 +102,7 @@ export class NotificationsService {
       }
     }
     return notification.link
-      ?.match(/^\/admin\/appointment\/details\/([a-f\d]{24})\/?$/i)?.[1]
+      ?.match(/^\/(?:admin|super-admin|dentist)\/appointment\/details\/([a-f\d]{24})\/?$/i)?.[1]
       .toLowerCase();
   }
 
@@ -107,8 +110,9 @@ export class NotificationsService {
     notification: Notification,
     actor: UserActor,
   ): boolean {
+    if (actor.role === 'super-admin') return true;
     return (
-      (actor.role === 'user' || actor.role === 'dentist') &&
+      (actor.role === 'super-admin' || actor.role === 'user' || actor.role === 'dentist') &&
       !notification.appointment &&
       !notification.link?.startsWith('/admin/')
     );

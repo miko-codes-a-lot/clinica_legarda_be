@@ -1,3 +1,4 @@
+import { ACTIVE_ACCOUNT, activePatientScope, requireActivePatient } from '../users/patient-visibility';
 import { randomUUID } from 'crypto';
 import { RescheduleResponseDto } from './dto/reschedule-response.dto';
 import { ReferralStatus } from '../_shared/enum/referral-status.enum';
@@ -43,7 +44,8 @@ import { Visit } from '../care/entities/visit.entity';
 import { TreatmentCase } from '../care/entities/treatment-case.entity';
 import { assertCareCaseLink } from '../care/clinical-rules';
 import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
-import { appointmentStart } from './appointment-time';
+import { appointmentStart, reservationDeadline } from './appointment-time';
+import { currentScheduleAttendance } from './appointment-attendance';
 import { referralReason } from '../referral/referral-reason';
 
 @Injectable()
@@ -114,6 +116,7 @@ export class AppointmentsService {
     })) throw new ForbiddenException('This dentist is outside your assigned clinics.');
     const appointments = await this.appointmentModel
       .find({
+        ...await activePatientScope(this.userModel),
         dentist: dentistId,
         status: { $in: OCCUPIED_STATUSES },
       })
@@ -129,12 +132,13 @@ export class AppointmentsService {
     }));
   }
 
-  findAll(actor: UserActor, patient?: string, clinic?: string) {
+  async findAll(actor: UserActor, patient?: string, clinic?: string) {
     if (clinic) assertClinicAccess(actor, clinic);
     return this.populate(
       this.appointmentModel.find({
         $and: [
           appointmentScope(actor),
+          await activePatientScope(this.userModel),
           patient ? { patient: referenceId(patient) } : {},
           clinic ? { clinic: referenceId(clinic) } : {},
         ],
@@ -142,12 +146,13 @@ export class AppointmentsService {
     ).exec().then(records => records.map(record => this.visibleAppointment(record, actor)));
   }
 
-  findAllByDentist(actor: UserActor, dentist: string, clinic?: string) {
+  async findAllByDentist(actor: UserActor, dentist: string, clinic?: string) {
     if (clinic) assertClinicAccess(actor, clinic);
     return this.populate(
       this.appointmentModel.find({
         $and: [
           appointmentScope(actor),
+          await activePatientScope(this.userModel),
           { dentist: referenceId(dentist) },
           clinic ? { clinic: referenceId(clinic) } : {},
         ],
@@ -175,8 +180,8 @@ export class AppointmentsService {
   private async authorizePatient(actor: UserActor, patient: string, session?: ClientSession) {
     const id = referenceId(patient);
     if (actor.role === 'user' && !sameId(id, actor.sub)) {
-      const child = await this.userModel.exists({ _id: id, role: 'user', isDependent: true, loginEnabled: false, guardian: referenceId(actor.sub) }).session(session ?? null);
-      const parent = await this.userModel.exists({ _id: referenceId(actor.sub), role: 'user', status: 'confirmed', otpVerifiedAt: { $type: 'date' }, loginEnabled: { $ne: false }, isDependent: { $ne: true } }).session(session ?? null);
+      const child = await this.userModel.exists({ _id: id, ...ACTIVE_ACCOUNT, role: 'user', isDependent: true, loginEnabled: false, guardian: referenceId(actor.sub) }).session(session ?? null);
+      const parent = await this.userModel.exists({ _id: referenceId(actor.sub), ...ACTIVE_ACCOUNT, role: 'user', status: 'confirmed', otpVerifiedAt: { $type: 'date' }, loginEnabled: { $ne: false }, isDependent: { $ne: true } }).session(session ?? null);
       if (!child || !parent) throw new ForbiddenException('This child is not currently managed by your verified parent account.');
     }
     if (actor.role !== 'admin') return;
@@ -189,7 +194,7 @@ export class AppointmentsService {
   private async requireBookablePatient(patient: string, actor: UserActor, session: ClientSession) {
     await this.authorizePatient(actor, patient, session);
     const eligible = await this.userModel.exists({
-      _id: referenceId(patient), role: 'user', status: { $in: patientBookingStatuses(actor.role) },
+      _id: referenceId(patient), ...ACTIVE_ACCOUNT, role: 'user', status: { $in: patientBookingStatuses(actor.role) },
     }).session(session);
     if (eligible) return;
     if (actor.role === 'user') throw new ForbiddenException('Verify your patient account before booking online. Sign in again and complete the email OTP.');
@@ -441,6 +446,7 @@ export class AppointmentsService {
       await this.scheduling.withLocks(
         referral.patient ? [referenceId(referral.patient)] : [],
         async (session) => {
+          if (referral.patient) await requireActivePatient(this.userModel, referral.patient, session);
           if (
             await this.appointmentModel
               .exists({ referral: referral._id })
@@ -466,6 +472,7 @@ export class AppointmentsService {
           current,
           {
             $set: { status: AppointmentStatus.REJECTED },
+            $unset: { rescheduleProposal: 1 },
             $push: {
               history: this.historyEntry('Appointment rejected.', actor, reasonOfDecline),
             },
@@ -519,9 +526,20 @@ export class AppointmentsService {
         }
       }
       if (status !== AppointmentStatus.CONFIRMED) await this.requireNoActiveVisit(current, session);
+      if (status === AppointmentStatus.NO_SHOW) {
+        if (Date.now() < reservationDeadline(current.date, current.startTime).getTime())
+          throw new ConflictException('No-show is available only after the 20-minute check-in grace period.');
+        if (this.visits && await this.visits.exists(currentScheduleAttendance(current)).session(session))
+          throw new ConflictException('This patient attended the current appointment schedule. Resolve its visit before changing the outcome.');
+      }
+      if (status === AppointmentStatus.COMPLETED && Date.now() < appointmentStart(current.date, current.startTime).getTime())
+        throw new ConflictException('An appointment cannot be completed before its scheduled start.');
       if (status === AppointmentStatus.COMPLETED && current.careCase)
         throw new ConflictException('Complete the checked-in clinical visit to finish this treatment session.');
       if (status === AppointmentStatus.CONFIRMED) {
+        this.requireResolvedDisruption(current);
+        if (Date.now() >= reservationDeadline(current.date, current.startTime).getTime())
+          throw new ConflictException('The 20-minute arrival deadline has passed. Reschedule this appointment before approving it.');
         await this.validateCareCase(current.careCase?.toString(), this.scheduleRequest(current), session);
         await this.scheduling.validate(
           this.scheduleRequest(current),
@@ -550,6 +568,11 @@ export class AppointmentsService {
     if (current.rescheduleProposal?.id !== id) throw new ConflictException('The proposed schedule changed. Reload the appointment before responding.');
   }
 
+  private requireResolvedDisruption(current: Appointment): void {
+    if (current.disruption)
+      throw new ConflictException('This appointment needs clinic review. Resolve the disruption or reschedule before confirming it.');
+  }
+
   private requireFutureSchedule(schedule: Pick<Appointment, 'date' | 'startTime'>) {
     if (appointmentStart(schedule.date, schedule.startTime).getTime() <= Date.now())
       throw new ConflictException('This time has already started. Choose another future appointment time.');
@@ -573,6 +596,7 @@ export class AppointmentsService {
         if (!dto.reason?.trim() || dto.reason.trim().length < 3) throw new BadRequestException('Explain how the patient agreed to this schedule.');
       }
       this.requireFutureSchedule(current);
+      this.requireResolvedDisruption(current);
       await this.requireBookablePatient(referenceId(current.patient), actor, session);
       await this.requireNoActiveVisit(current, session);
       const validated = await this.scheduling.validate(this.scheduleRequest(current), session, id);
@@ -798,6 +822,7 @@ export class AppointmentsService {
         if (!current)
           throw new NotFoundException(`Appointment with ID "${id}" not found.`);
         authorize(current);
+        await requireActivePatient(this.userModel, current.patient, session);
         await this.authorizePatient(actor, referenceId(current.patient), session);
         const after = this.scheduleRequest(current);
         if (

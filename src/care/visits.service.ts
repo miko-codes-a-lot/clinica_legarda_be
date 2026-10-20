@@ -1,3 +1,4 @@
+import { requireActivePatient } from '../users/patient-visibility';
 import { ClinicClosure } from '../clinic-closures/entities/clinic-closure.entity';
 import { assertOpenInterval } from '../clinic-closures/closure-rules';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
@@ -53,6 +54,7 @@ export class VisitsService implements OnModuleInit {
         const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
         assertOpenInterval(closed, day, time, `${time}:59`);
         let walkIn = dto.isWalkIn ?? !dto.appointment;
+        let appointmentScheduleVersion: number | undefined;
         let caseId = dto.careCase ? referenceId(dto.careCase) : undefined;
         if (dto.appointment) {
           const appointment = await this.appointments.findById(referenceId(dto.appointment)).session(session);
@@ -60,6 +62,7 @@ export class VisitsService implements OnModuleInit {
           if (!sameId(appointment.patient, patientId) || !sameId(appointment.clinic, clinicId) || !sameId(appointment.dentist, dentistId))
             throw new BadRequestException('The appointment must belong to this patient, clinic and dentist.');
           assertAppointmentCheckIn(appointment, day);
+          appointmentScheduleVersion = appointment.scheduleVersion ?? 0;
           assertOpenInterval(closed, day, appointment.startTime, appointment.endTime);
           if (appointment.careCase) {
             if (caseId && !sameId(caseId, appointment.careCase)) throw new BadRequestException('The visit must use its appointment treatment case.');
@@ -76,7 +79,7 @@ export class VisitsService implements OnModuleInit {
         const now = new Date();
         const [visit] = await this.visits.create([{
           patient: patientId, dentist: dentistId, clinic: clinicId,
-          ...(dto.appointment ? { appointment: referenceId(dto.appointment), appointmentKey: referenceId(dto.appointment) } : {}),
+          ...(dto.appointment ? { appointment: referenceId(dto.appointment), appointmentKey: referenceId(dto.appointment), appointmentScheduleVersion } : {}),
           ...(caseId ? { careCase: caseId } : {}),
           date: day, checkedInAt: now, purpose: dto.purpose, isWalkIn: walkIn,
           activeKey: `${patientId}:${clinicId}`, createdBy: referenceId(actor.sub),
@@ -104,7 +107,7 @@ export class VisitsService implements OnModuleInit {
   async list(actor: UserActor, query: VisitQueryDto, queue = false) {
     requireCareStaff(actor);
     if (query.patient) await this.access.requirePatient(actor, query.patient, query.clinic);
-    return this.populate(this.visits.find({ ...this.access.scope(actor, query.clinic),
+    return this.populate(this.visits.find({ ...this.access.scope(actor, query.clinic), ...await this.access.activePatients(),
       ...(query.patient ? { patient: referenceId(query.patient) } : {}),
       ...(query.appointment ? { appointment: referenceId(query.appointment) } : {}),
       ...(queue || query.date ? { date: query.date ?? manilaDay() } : {}),
@@ -136,6 +139,8 @@ export class VisitsService implements OnModuleInit {
   async transition(actor: UserActor, id: string, dto: VisitTransitionDto) {
     await this.visits.db.transaction(async session => {
       const visit = await this.requireVisit(actor, id, session);
+      await this.lockParticipants([referenceId(visit.patient), referenceId(visit.dentist)], referenceId(visit.clinic), session);
+      await requireActivePatient(this.users, visit.patient, session);
       this.access.requireClinic(actor, referenceId(visit.clinic));
       assertQueueTransition(visit.state, dto.state, actor.role, sameId(actor.sub, visit.dentist), dto.reason);
       const now = new Date();
@@ -154,6 +159,7 @@ export class VisitsService implements OnModuleInit {
     await this.visits.db.transaction(async session => {
       const current = await this.requireVisit(actor, id, session);
       await this.lockParticipants([referenceId(current.patient), referenceId(current.dentist)], referenceId(current.clinic), session);
+      await requireActivePatient(this.users, current.patient, session);
       assertClinicalRecordWrite(current, actor, dto.revision, dto.complete, dto.summary);
       if (dto.treatments.some(item => !item.description.trim())) throw new BadRequestException('Treatment descriptions cannot be blank.');
       if (dto.complete && current.purpose === 'treatment' && !dto.treatments.length) throw new BadRequestException('Record at least one performed treatment before completing a treatment session.');

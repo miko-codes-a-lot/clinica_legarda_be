@@ -56,6 +56,13 @@ describe('loading the appointment notice recipient', () => {
     return { findById: () => query } as unknown as Model<User>;
   };
 
+  it('suppresses a deleted ordinary patient even when a queued notice retains the contact', async () => {
+    expect(await findPatientRecipient(usersReturning({ ...patient, isDependent: false, deletedAt: new Date() }), patient._id)).toBeNull();
+  });
+  it('suppresses a deleted child and a deleted guardian', async () => {
+    expect(await findPatientRecipient(usersReturning({ ...patient, deletedAt: new Date(), guardian }), patient._id)).toBeNull();
+    expect(await findPatientRecipient(usersReturning({ ...patient, guardian: { ...guardian, deletedAt: new Date() } }), patient._id)).toBeNull();
+  });
   it('loads the mobile number of an ordinary patient', async () => {
     const users = usersReturning({ ...patient, isDependent: false, mobileNumber: '+639171234567' });
     expect(await findPatientRecipient(users, patient._id)).toMatchObject({ mobileNumber: '+639171234567' });

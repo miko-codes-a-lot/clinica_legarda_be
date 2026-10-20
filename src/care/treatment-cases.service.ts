@@ -1,3 +1,4 @@
+import { requireActivePatient } from '../users/patient-visibility';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model } from 'mongoose';
@@ -60,6 +61,7 @@ export class TreatmentCasesService implements OnModuleInit {
       const locked = await this.users.updateOne({ _id: id }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
       if (!locked.matchedCount) throw new ConflictException('Case participant no longer exists.');
     }
+    await requireActivePatient(this.users, record.patient, session);
     const locked = await this.clinics.updateOne({ _id: referenceId(record.clinic) }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
     if (!locked.matchedCount) throw new ConflictException('Case clinic no longer exists.');
   }
@@ -80,7 +82,7 @@ export class TreatmentCasesService implements OnModuleInit {
   async list(actor: UserActor, query: TreatmentCaseQueryDto) {
     requireCareStaff(actor);
     if (query.patient) await this.access.requirePatient(actor, query.patient, query.clinic);
-    return this.populate(this.cases.find({ ...this.access.scope(actor, query.clinic), ...(query.patient ? { patient: referenceId(query.patient) } : {}) })).sort({ createdAt: -1 }).lean().exec();
+    return this.populate(this.cases.find({ ...this.access.scope(actor, query.clinic), ...await this.access.activePatients(), ...(query.patient ? { patient: referenceId(query.patient) } : {}) })).sort({ createdAt: -1 }).lean().exec();
   }
   async findOne(actor: UserActor, id: string) {
     const record = await this.requireCase(actor, id);

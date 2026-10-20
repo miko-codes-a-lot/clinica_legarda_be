@@ -24,15 +24,15 @@ export class DentalChartsService {
     requireCareStaff(actor);
     return this.clinics.find(actor.role === 'super-admin' ? {} : { _id: { $in: (actor.clinics ?? []).map(referenceId) } }).select('_id name').sort({ name: 1 }).lean();
   }
-  private async scope(actor: UserActor, patient: string, query: DentalChartQueryDto, session?: ClientSession) {
+  private async scope(actor: UserActor, patient: string, query: DentalChartQueryDto, session?: ClientSession, includeDeleted = false) {
     requireCareStaff(actor); requireCareClinic(actor, query.clinic); toothNumbers(query.dentition);
-    await this.access.requirePatient(actor, patient, query.clinic, session);
+    await this.access.requirePatient(actor, patient, query.clinic, session, includeDeleted);
     if (query.revision !== undefined && (!Number.isInteger(query.revision) || query.revision < 1)) throw new BadRequestException('Select a valid chart revision.');
     return { patient: referenceId(patient), clinic: referenceId(query.clinic), dentition: query.dentition };
   }
   async read(actor: UserActor, patient: string, query: DentalChartQueryDto, session?: ClientSession): Promise<DentalChartResponse> {
     if (!session) return this.charts.db.transaction(snapshot => this.read(actor, patient, query, snapshot));
-    const scope = await this.scope(actor, patient, query, session);
+    const scope = await this.scope(actor, patient, query, session, true);
     const current = await this.charts.findOne(scope).session(session ?? null).select('revision').lean();
     const chart = query.revision === undefined ? await this.charts.findOne(scope).session(session ?? null)
       .populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'updatedBy', select: CARE_CLINICIAN_FIELDS }]).lean<DentalChartView>()

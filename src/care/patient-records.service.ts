@@ -43,7 +43,7 @@ export class PatientRecordsService {
 
   async findOne(actor: UserActor, id: string, clinic?: string) {
     requireCareStaff(actor);
-    const patient = await this.access.requirePatient(actor, id, clinic);
+    const patient = await this.access.requirePatient(actor, id, clinic, undefined, true);
     const appointments = await this.appointments.find({ patient: patient._id, ...this.access.scope(actor, clinic) })
       .select('_id clinic dentist date startTime endTime status isWalkIn services careCase')
       .populate({ path: 'clinic', select: CARE_CLINIC_FIELDS })
@@ -56,7 +56,7 @@ export class PatientRecordsService {
     requireCareStaff(actor);
     if (!this.visits || !this.cases) throw new ServiceUnavailableException('Patient record export is unavailable.');
     return this.appointments.db.transaction(async session => {
-      const patient = await this.access.requirePatient(actor, id, clinic, session);
+      const patient = await this.access.requirePatient(actor, id, clinic, session, true);
       const scope = { patient: patient._id, ...this.access.scope(actor, clinic) };
       const appointments = await this.appointments.find(scope).select('_id clinic dentist date startTime endTime status isWalkIn services careCase')
         .populate([{ path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }, { path: 'services', select: '_id name' }])

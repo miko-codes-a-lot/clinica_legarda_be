@@ -98,7 +98,7 @@ localTests('Scoped appointment reports', () => {
     ]);
     await connection
       .model(User.name)
-      .create({ _id: ids.patient, firstName: 'Test', lastName: 'Patient' });
+      .create({ _id: ids.patient, role: 'user', firstName: 'Test', lastName: 'Patient' });
     await connection.model(DentalCatalog.name).create([
       { _id: ids.cleaning, name: 'Cleaning' },
       { _id: ids.filling, name: 'Filling' },

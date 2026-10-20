@@ -1,3 +1,4 @@
+import { ACTIVE_ACCOUNT, requireActivePatient } from '../users/patient-visibility';
 import { PatientRecordChangesService, changedPatientFields, PROFILE_AUDIT_FIELDS } from '../patient-record-changes/patient-record-changes.service';
 import { assignedClinicIds } from '../users/clinic-membership';
 import { randomUUID } from 'crypto';
@@ -16,7 +17,7 @@ import { UserStatus } from '../_shared/enum/user-status.enum';
 import { DependentUpsertDto, LinkGuardianDto } from './dependents.dto';
 
 export const DEPENDENT_FIELDS = '_id firstName middleName lastName birthDate sex status isDependent loginEnabled verificationSource guardian';
-export const verifiedParentFilter = { role: 'user', status: UserStatus.CONFIRMED, isDependent: { $ne: true }, loginEnabled: { $ne: false }, otpVerifiedAt: { $type: 'date' } };
+export const verifiedParentFilter = { ...ACTIVE_ACCOUNT, role: 'user', status: UserStatus.CONFIRMED, isDependent: { $ne: true }, loginEnabled: { $ne: false }, otpVerifiedAt: { $type: 'date' } };
 @Injectable()
 export class DependentsService {
   constructor(@InjectModel(User.name) private readonly users: Model<User>,
@@ -31,11 +32,11 @@ export class DependentsService {
   async list(actor: UserActor) {
     if (actor.role !== 'user') throw new ForbiddenException('Use a parent account.');
     await this.parent(actor.sub);
-    return this.users.find({ guardian: referenceId(actor.sub), role: 'user', isDependent: true, loginEnabled: false }).select(DEPENDENT_FIELDS).sort({ firstName: 1 }).lean();
+    return this.users.find({ guardian: referenceId(actor.sub), ...ACTIVE_ACCOUNT, role: 'user', isDependent: true, loginEnabled: false }).select(DEPENDENT_FIELDS).sort({ firstName: 1 }).lean();
   }
   private async locks(ids: string[], session: ClientSession) {
     for (const id of [...new Set(ids.map(referenceId))].sort()) {
-      const result = await this.users.updateOne({ _id: id }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
+      const result = await this.users.updateOne({ _id: id, ...ACTIVE_ACCOUNT }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
       if (!result.matchedCount) throw new BadRequestException('Account no longer exists.');
     }
   }
@@ -61,6 +62,7 @@ export class DependentsService {
   }
   private async staffPatient(actor: UserActor, id: string, session: ClientSession) {
     if (!['admin','super-admin'].includes(actor.role)) throw new ForbiddenException('Only administrators may confirm existing patient relationships.');
+    await requireActivePatient(this.users, id, session);
     if (actor.role === 'super-admin') return;
     const scope = adminClinicScope(actor);
     const patient = await this.users.findById(id).session(session);
@@ -111,11 +113,11 @@ export class DependentsService {
     if (!dto.confirmExistingPatient || sameId(id, dto.guardian)) throw new BadRequestException('Confirm the existing patient’s parent relationship.');
     return this.users.db.transaction(async session => {
       await this.locks([id, dto.guardian], session); await this.staffPatient(actor, id, session); await this.parent(dto.guardian, session);
-      const child = await this.users.findOne({ _id: referenceId(id), role: 'user' }).session(session);
+      const child = await this.users.findOne({ _id: referenceId(id), role: 'user', ...ACTIVE_ACCOUNT }).session(session);
       if (!child) throw new BadRequestException('Patient not found.');
       if (child.status === UserStatus.REJECTED) throw new BadRequestException('Review this patient’s rejected account status before linking a parent.');
       if (child.guardian && !sameId(child.guardian, dto.guardian)) throw new ConflictException('Remove the current parent relationship before linking another.');
-      if (await this.users.exists({ guardian: child._id, isDependent: true }).session(session)) throw new ConflictException('An account managing children cannot itself become a dependent.');
+      if (await this.users.exists({ guardian: child._id, isDependent: true, ...ACTIVE_ACCOUNT }).session(session)) throw new ConflictException('An account managing children cannot itself become a dependent.');
       return this.users.findOneAndUpdate({ _id: child._id }, { $set: { guardian: referenceId(dto.guardian), isDependent: true, loginEnabled: false,
         verificationSource: 'guardian', status: UserStatus.CONFIRMED } }, { new: true, session }).select(DEPENDENT_FIELDS).lean();
     });

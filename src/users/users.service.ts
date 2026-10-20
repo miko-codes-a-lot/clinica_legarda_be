@@ -1,3 +1,5 @@
+import { ACTIVE_ACCOUNT } from './patient-visibility';
+import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
 import { DentalChart, DentalChartVersion } from '../dental-charts/entities/dental-chart.entity';
 import { findPatientRecipient } from './patient-recipient';
 import {
@@ -43,23 +45,49 @@ export class UsersService {
   ) {}
 
   findByOneUsername(username: string) {
-    return this.userModel.findOne({ username }).populate('clinic clinics');
+    return this.userModel.findOne({ username, ...ACTIVE_ACCOUNT }).populate('clinic clinics');
   }
 
   findForSignIn(username: string) {
-    return this.userModel.findOne({ username, isDependent: { $ne: true }, loginEnabled: { $ne: false } }).populate('clinic clinics').select('+password');
+    return this.userModel.findOne({ username, ...ACTIVE_ACCOUNT, isDependent: { $ne: true }, loginEnabled: { $ne: false } }).populate('clinic clinics').select('+password');
   }
 
   findForResetOtp(emailAddress: string) {
     return this.userModel
-      .findOne({ emailAddress, isDependent: { $ne: true }, loginEnabled: { $ne: false } })
+      .findOne({ emailAddress, ...ACTIVE_ACCOUNT, isDependent: { $ne: true }, loginEnabled: { $ne: false } })
       .select('+password +resetOtp +resetOtpExpires +resetOtpVerified');
+  }
+
+  private resetAccountScope(user: User) {
+    return { _id: user._id, ...ACTIVE_ACCOUNT, emailAddress: user.emailAddress, mobileNumber: user.mobileNumber,
+      isDependent: { $ne: true }, loginEnabled: { $ne: false } };
+  }
+
+  async issueResetOtp(user: User, code: string, expiry: Date): Promise<boolean> {
+    const result = await this.userModel.updateOne(this.resetAccountScope(user), {
+      $set: { resetOtp: code, resetOtpExpires: expiry, resetOtpVerified: false },
+    });
+    return !!result.matchedCount;
+  }
+
+  async verifyResetOtpState(user: User, code: string): Promise<boolean> {
+    const result = await this.userModel.updateOne({ ...this.resetAccountScope(user), resetOtp: code, resetOtpExpires: { $gt: new Date() } }, {
+      $set: { resetOtpVerified: true },
+    });
+    return !!result.matchedCount;
+  }
+
+  async completePasswordReset(user: User, passwordHash: string): Promise<boolean> {
+    const result = await this.userModel.updateOne({ ...this.resetAccountScope(user), resetOtp: user.resetOtp, resetOtpVerified: true,
+      $and: [{ resetOtpExpires: user.resetOtpExpires }, { resetOtpExpires: { $gt: new Date() } }],
+    }, { $set: { password: passwordHash, resetOtpVerified: false }, $unset: { resetOtp: 1, resetOtpExpires: 1 } });
+    return !!result.matchedCount;
   }
 
   async managedPatientIds(user: User): Promise<string[]> {
     const own = referenceId(user._id);
     if (user.role !== 'user' || user.isDependent || user.loginEnabled === false || user.status !== UserStatus.CONFIRMED || !user.otpVerifiedAt) return [own];
-    return [own, ...(await this.userModel.find({ guardian: own, role: 'user', isDependent: true, loginEnabled: false }).select('_id').lean()).map(child => referenceId(child._id))];
+    return [own, ...(await this.userModel.find({ guardian: own, ...ACTIVE_ACCOUNT, role: 'user', isDependent: true, loginEnabled: false }).select('_id').lean()).map(child => referenceId(child._id))];
   }
 
   async findAll(actor: UserActor) {
@@ -68,14 +96,14 @@ export class UsersService {
         'Only administrators may access the user directory.',
       );
     const filter = actor.role === 'admin' ? await this.adminUserFilter(actor) : {};
-    const users = await this.userModel.find(filter).populate('clinic clinics');
+    const users = await this.userModel.find({ ...filter, ...ACTIVE_ACCOUNT }).populate('clinic clinics');
     return users.map(user => this.visibleUser(user, actor));
   }
 
   async dentistDirectory(actor: UserActor) {
     if (!actor?.sub) throw new ForbiddenException('Authentication required.');
     const users = await this.userModel
-      .find({ role: 'dentist', status: UserStatus.CONFIRMED,
+      .find({ ...ACTIVE_ACCOUNT, role: 'dentist', status: UserStatus.CONFIRMED,
         ...(actor.role === 'admin' ? clinicMembershipFilter(adminClinicIds(actor)) : {}),
       })
       .select(DENTIST_DIRECTORY_FIELDS)
@@ -87,7 +115,7 @@ export class UsersService {
     if (!isAdmin(actor) && actor?.role !== 'dentist')
       throw new ForbiddenException('You cannot access the patient directory.');
     if (actor.role === 'admin') {
-      return this.userModel.find({ role: 'user', ...await this.adminPatientFilter(actor) })
+      return this.userModel.find({ ...ACTIVE_ACCOUNT, role: 'user', ...await this.adminPatientFilter(actor) })
         .select(PATIENT_DIRECTORY_FIELDS);
     }
     const patientIds = isAdmin(actor)
@@ -97,7 +125,7 @@ export class UsersService {
         })).map(referenceId);
     if (patientIds && this.visits) patientIds.push(...(await this.visits.distinct('patient', { dentist: referenceId(actor.sub) })).map(referenceId));
     return this.userModel
-      .find({ role: 'user', ...(patientIds && { _id: { $in: patientIds } }) })
+      .find({ ...ACTIVE_ACCOUNT, role: 'user', ...(patientIds && { _id: { $in: patientIds } }) })
       .select(PATIENT_DIRECTORY_FIELDS);
   }
 
@@ -106,7 +134,7 @@ export class UsersService {
   /** Trusted recipient lookup, deliberately unavailable as a directory route. */
   notificationStaffRecipients(clinicId?: string) {
     return this.userModel
-      .find({ $or: [
+      .find({ ...ACTIVE_ACCOUNT, $or: [
         { role: 'super-admin' },
         ...(clinicId ? [{ role: 'admin', ...clinicMembershipFilter(referenceId(clinicId)) }] : []),
       ] })
@@ -114,7 +142,7 @@ export class UsersService {
   }
 
   findForAuthentication(id: string) {
-    return this.userModel.findById(referenceId(id)).populate('clinic clinics');
+    return this.userModel.findOne({ _id: referenceId(id), ...ACTIVE_ACCOUNT }).populate('clinic clinics');
   }
 
   async findOne(id: string, actor: UserActor) {
@@ -182,6 +210,7 @@ export class UsersService {
       throw new ForbiddenException('You cannot change this picture.');
     const existing = await this.userModel.findById(referenceId(id));
     if (!existing) throw new NotFoundException('User not found.');
+    if (existing.deletedAt) throw new ConflictException('Deleted patient records are read-only.');
     if (existing.role === 'super-admin' && actor.role !== 'super-admin')
       throw new ForbiddenException(
         'Only super administrators may manage super administrators.',
@@ -196,14 +225,15 @@ export class UsersService {
         await this.userModel.updateOne({ _id: id }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
         const before = await this.userModel.findById(id).session(session);
         if (!before) throw new NotFoundException('User not found.');
-        const saved = await this.userModel.findByIdAndUpdate(id, { profilePicture: fileName }, { new: true, runValidators: true, session });
+        if (before.deletedAt) throw new ConflictException('Deleted patient records are read-only.');
+        const saved = await this.userModel.findOneAndUpdate({ _id: id, ...ACTIVE_ACCOUNT }, { profilePicture: fileName }, { new: true, runValidators: true, session });
         if (!saved) throw new NotFoundException('User not found.');
         if (before.role === 'user') await this.recordProfileChange(before, saved, actor, session);
         return this.visibleUser(saved, actor);
       });
     }
-    const updated = await this.userModel.findByIdAndUpdate(
-      id,
+    const updated = await this.userModel.findOneAndUpdate(
+      { _id: id, ...ACTIVE_ACCOUNT },
       { profilePicture: fileName },
       { new: true, runValidators: true },
     );
@@ -255,6 +285,7 @@ export class UsersService {
     }
     const existing = id ? await this.userModel.findById(id) : null;
     if (id && !existing) throw new NotFoundException('User not found.');
+    if (existing?.deletedAt) throw new ConflictException('Deleted patient records are read-only.');
     if (!existing && doc.role === undefined) throw new BadRequestException('Select a valid user role.');
     if (actor.role === 'admin') {
       if (existing) await this.authorizeProfile(existing, actor);
@@ -269,7 +300,7 @@ export class UsersService {
 
     if (existing?.isDependent && (doc.password || (doc.role !== undefined && doc.role !== 'user') || (doc.status !== undefined && doc.status !== existing.status))) throw new ForbiddenException('Manage this patient through the parent relationship and clinical records.');
     const update = this.profileFields(doc);
-    const writeCondition: FilterQuery<User> = {};
+    const writeCondition: FilterQuery<User> = { ...ACTIVE_ACCOUNT };
     if (!isAdmin(actor)) {
       if (!existing) throw new ForbiddenException('You cannot create users.');
       const assigned = assignedClinicIds(existing);
@@ -445,11 +476,16 @@ export class UsersService {
       kind: 'profile', fields, sourceEventId: `profile:${before.id}:${randomUUID()}` });
   }
 
-  private async hasOutsideClinicAccess(user: User, actor: UserActor) {
+  private async hasOutsideClinicAccess(user: User, actor: UserActor, session?: ClientSession) {
     const clinics = adminClinicIds(actor);
-    return assignedClinicIds(user).some(clinic => !clinics.includes(referenceId(clinic))) ||
-      !!await this.appointmentModel.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } }) ||
-      !!(this.visits && await this.visits.exists({ $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } }));
+    if (assignedClinicIds(user).some(clinic => !clinics.includes(referenceId(clinic)))) return true;
+    const filter = { $or: [{ patient: user._id }, { dentist: user._id }], clinic: { $nin: clinics } };
+    const appointments = this.appointmentModel.exists(filter);
+    if (await (session ? appointments.session(session) : appointments)) return true;
+    if (!this.visits) return false;
+    const visits = this.visits.exists(filter);
+    return !!await (session ? visits.session(session) : visits);
+
   }
 
   /** Public registration has an explicit, nonprivileged write path. */
@@ -577,11 +613,40 @@ export class UsersService {
       throw new BadRequestException('Super admin accounts cannot be deleted.');
     }
 
+    if (user.role === 'user') {
+      await this.userModel.db.transaction(async session => {
+        const current = await this.userModel.findOneAndUpdate(
+          { _id: user._id, role: 'user' }, { $inc: { scheduleRevision: 1 } }, { new: true, session, timestamps: false },
+        );
+        if (!current) throw new ConflictException('The account changed. Reload before deleting it.');
+        if (actor.role === 'admin') {
+          await this.authorizeProfile(current, actor);
+          if (await this.hasOutsideClinicAccess(current, actor, session)) throw new ForbiddenException('Only super administrators may delete users shared with other clinics.');
+        }
+        if (current.deletedAt) return;
+        if (this.visits && await this.visits.exists({ patient: id, state: { $in: ['waiting', 'in_progress'] } }).session(session))
+          throw new ConflictException('Finish or cancel active care in the treatment queue before deleting this patient.');
+        if (await this.userModel.exists({ guardian: id, isDependent: true, ...ACTIVE_ACCOUNT }).session(session))
+          throw new ConflictException('Remove or transfer linked child relationships before deleting this parent account.');
+        const deletedAt = new Date();
+        await this.userModel.updateOne({ _id: id }, {
+          $set: { deletedAt, deletedBy: referenceId(actor.sub), loginEnabled: false, resetOtpVerified: false },
+          $unset: { resetOtp: 1, resetOtpExpires: 1, otpVerifiedAt: 1 },
+        }, { session });
+        await this.appointmentModel.updateMany({ patient: id, status: { $in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] } }, {
+          $set: { status: AppointmentStatus.CANCELLED }, $unset: { rescheduleProposal: 1, disruption: 1 },
+          $push: { history: { action: 'Appointment cancelled because the patient account was deleted.', reason: 'Patient account deleted.', actorId: referenceId(actor.sub), actorRole: actor.role, timestamp: deletedAt } },
+        }, { session });
+      });
+      return { message: 'Patient deleted. Records are retained and active appointments have been cancelled.' };
+    }
+
     if (this.visits) {
       await this.userModel.db.transaction(async session => {
         const locked = await this.userModel.updateOne({ _id: user._id, role: user.role }, { $inc: { scheduleRevision: 1 } }, { session, timestamps: false });
         if (!locked.matchedCount) throw new ConflictException('The account changed. Reload before deleting it.');
         await this.requireNoCareHistory(id, session, true);
+        if (await this.appointmentModel.exists({ $or: [{ patient: id }, { dentist: id }, { createdBy: id }] }).session(session)) throw new ConflictException('This account is referenced by retained appointments. Keep its identity.');
         await this.userModel.findByIdAndDelete(id, { session });
       });
     } else await this.userModel.findByIdAndDelete(id);
@@ -594,7 +659,7 @@ export class UsersService {
   private async requireNoCareHistory(id: string, session: ClientSession, includeAudit = false) {
     const chartReference = { $or: [{ patient: id }, { updatedBy: id }] };
     if ((this.charts && await this.charts.exists(chartReference).session(session)) || (this.chartVersions && await this.chartVersions.exists(chartReference).session(session))) throw new ConflictException('This account is referenced by retained dental charts. Keep its identity and role.');
-    if (await this.userModel.exists({ guardian: id, isDependent: true }).session(session)) throw new ConflictException('Remove or transfer linked child relationships before deleting or changing this parent account.');
+    if (await this.userModel.exists({ guardian: id, isDependent: true, ...ACTIVE_ACCOUNT }).session(session)) throw new ConflictException('Remove or transfer linked child relationships before deleting or changing this parent account.');
     if (await this.userModel.exists({ _id: id, isDependent: true }).session(session) && await this.appointmentModel.exists({ patient: id }).session(session)) throw new ConflictException('This child has retained appointment records. Keep the patient identity.');
     if (this.visits && await this.visits.exists({ $or: [
       { patient: id }, { dentist: id }, ...(includeAudit ? [{ createdBy: id }, { 'events.actor': id }, { clinicalAuthor: id }] : []),
@@ -606,7 +671,7 @@ export class UsersService {
     const status = user.role === 'user' && [UserStatus.PENDING, UserStatus.WALK_IN].includes(user.status)
       ? UserStatus.CONFIRMED : user.status;
     const verified = await this.userModel.findOneAndUpdate(
-      { _id: user._id, emailAddress: user.emailAddress, role: user.role, status: user.status, isDependent: { $ne: true }, loginEnabled: { $ne: false } },
+      { _id: user._id, ...ACTIVE_ACCOUNT, emailAddress: user.emailAddress, role: user.role, status: user.status, isDependent: { $ne: true }, loginEnabled: { $ne: false } },
       { $set: { otpVerifiedAt: new Date(), status, verificationSource: 'email' } },
       { new: true },
     ).populate('clinic clinics');

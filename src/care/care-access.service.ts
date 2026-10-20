@@ -1,3 +1,4 @@
+import { ACTIVE_ACCOUNT, activePatientScope } from '../users/patient-visibility';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, FilterQuery, Model } from 'mongoose';
@@ -9,7 +10,7 @@ import { clinicMembershipFilter } from '../users/clinic-membership';
 import { careScope, requireCareClinic, requireCareStaff } from './care-policy';
 import { Visit } from './entities/visit.entity';
 
-export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address birthDate sex occupation religion maritalStatus isDependent loginEnabled verificationSource guardian';
+export const CARE_PERSON_FIELDS = '_id firstName middleName lastName username role status isWalkIn emailAddress mobileNumber address birthDate sex occupation religion maritalStatus isDependent loginEnabled deletedAt verificationSource guardian';
 export const CARE_CLINIC_FIELDS = '_id name address mobileNumber';
 export const CARE_CLINICIAN_FIELDS = '_id firstName middleName lastName';
 
@@ -24,21 +25,24 @@ export class CareAccessService {
   scope(actor: UserActor, clinic?: string): Record<string, unknown> { return careScope(actor, clinic); }
   requireClinic(actor: UserActor, clinic: string): void { requireCareClinic(actor, clinic); }
 
-  async patientFilter(actor: UserActor, clinic?: string, session?: ClientSession): Promise<FilterQuery<User>> {
-    if (actor.role === 'user') return { role: 'user', _id: { $in: actorPatientIds(actor).map(referenceId) } };
+  async patientFilter(actor: UserActor, clinic?: string, session?: ClientSession, includeDeleted = false): Promise<FilterQuery<User>> {
+    const visible = includeDeleted ? {} : ACTIVE_ACCOUNT;
+    if (actor.role === 'user') return { ...visible, role: 'user', _id: { $in: actorPatientIds(actor).map(referenceId) } };
     requireCareStaff(actor);
-    if (actor.role === 'super-admin' && !clinic) return { role: 'user' };
+    if (actor.role === 'super-admin' && !clinic) return { ...visible, role: 'user' };
     const scope = careScope(actor, clinic);
     const patients = (await this.appointments.distinct('patient', scope).session(session ?? null)).map(referenceId);
     if (this.visits) patients.push(...(await this.visits.distinct('patient', scope).session(session ?? null)).map(referenceId));
-    if (actor.role === 'dentist') return { role: 'user', _id: { $in: patients } };
+    if (actor.role === 'dentist') return { ...visible, role: 'user', _id: { $in: patients } };
     const clinics = clinic ? [referenceId(clinic)] : [...(actor.clinics ?? [])].map(referenceId);
-    return { role: 'user', $or: [{ _id: { $in: patients } }, clinicMembershipFilter(clinics)] };
+    return { ...visible, role: 'user', $or: [{ _id: { $in: patients } }, clinicMembershipFilter(clinics)] };
   }
 
-  async requirePatient(actor: UserActor, patient: string, clinic?: string, session?: ClientSession) {
+  activePatients(session?: ClientSession) { return activePatientScope(this.users, session); }
+
+  async requirePatient(actor: UserActor, patient: string, clinic?: string, session?: ClientSession, includeDeleted = false) {
     const id = referenceId(patient);
-    const filter = await this.patientFilter(actor, clinic, session);
+    const filter = await this.patientFilter(actor, clinic, session, includeDeleted);
     const record = await this.users.findOne({ $and: [{ _id: id }, filter] })
       .select(CARE_PERSON_FIELDS).session(session ?? null).lean().exec();
     if (record) return record;

@@ -66,6 +66,9 @@ isolated('Walk-in registration and verified booking contract', () => {
     await app.init();
   });
   beforeEach(async () => {
+    // Keep fixture appointments future-dated without changing the real OTP clock independently.
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'performance', 'queueMicrotask'] });
+    jest.setSystemTime(new Date('2026-10-11T00:00:00Z'));
     await Promise.all(Object.values(connection.models).map(model => model.deleteMany({})));
     code = ''; recipient = ''; claims.clear();
     const hours = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(day => ({ day, startTime: '08:00', endTime: '18:00' }));
@@ -81,6 +84,7 @@ isolated('Walk-in registration and verified booking contract', () => {
     fixture = { admin: people[0].id, outsideAdmin: people[1].id, patient: people[2].id, dentist: people[3].id, clinic: places[0].id, outsideClinic: places[1].id, service: service.id };
     for (const [token, person] of [['admin', people[0]], ['outside', people[1]], ['patient', people[2]], ['dentist', people[3]]] as const) claims.set(token, { sub: person.id, role: person.role, username: person.username });
   });
+  afterEach(() => { jest.useRealTimers(); });
   afterAll(async () => { await app?.close(); await connection?.close(); });
   const staffPost = (path: string, body: object, token = 'admin') => request(app.getHttpServer()).post(path).set('Cookie', `jwt=${token}`).send(body);
   const profile = (username = 'new.walkin') => ({ firstName: 'Learning', lastName: 'Walkin', username, password, address: 'Manila', role: 'user', isWalkIn: true });

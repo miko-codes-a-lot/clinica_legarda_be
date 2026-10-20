@@ -1,3 +1,5 @@
+import { activePatientScope } from '../users/patient-visibility';
+import { User } from '../users/entities/user.entity';
 import { ForbiddenException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -59,13 +61,14 @@ export class AnalyticsService {
     private readonly appointmentModel: Model<Appointment>,
     @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
     @Optional() private readonly recordChanges?: PatientRecordChangesService,
+    @Optional() @InjectModel(User.name) private readonly users?: Model<User>,
   ) {}
 
   async getReport(clinicId: string, actor: UserActor, query: ReportQuery = {}): Promise<ClinicAnalyticsReport> {
     // The combined patient-record audit report is an administrator capability.
     // Existing dentist-only appointment report endpoints retain their ownership rules.
     if (!isAdmin(actor)) throw new ForbiddenException('Only administrators may access combined clinic reports.');
-    const scope = reportScope(clinicId, actor), period = reportPeriod(new Date(Date.now()), query);
+    const scope = { ...reportScope(clinicId, actor), ...(this.users ? await activePatientScope(this.users) : {}) }, period = reportPeriod(new Date(Date.now()), query);
     if (!this.recordChanges) throw new ServiceUnavailableException('Patient record reporting is unavailable.');
     const coverageFrom = await this.recordChanges.coverage();
     const auditScope = clinicId !== 'all' ? { clinicScope: referenceId(clinicId) } : actor.role === 'admin'
@@ -73,7 +76,7 @@ export class AnalyticsService {
     return this.appointmentModel.db.transaction(async session => {
       const records = await this.appointmentModel.find({ ...scope, date: { $gte: period.appointmentStart, $lt: period.appointmentEnd } })
         .select('date status services patient').populate('services', '_id name').session(session).lean();
-      const changes = await this.recordChanges!.inPeriod(auditScope, period.updateStart, period.updateEnd, session);
+      const changes = await this.recordChanges!.inPeriod({ ...auditScope, ...(this.users ? await activePatientScope(this.users, session) : {}) }, period.updateStart, period.updateEnd, session);
       const empty = () => Array<number>(period.bucketKeys.length).fill(0);
       const appointments = empty(), completed = empty(), noShow = empty(), counts = empty();
       const statuses: Record<string, number> = Object.fromEntries(Object.values(AppointmentStatus).map(status => [status, 0]));
@@ -129,7 +132,7 @@ export class AnalyticsService {
     clinicId: string,
     actor: UserActor,
   ): Promise<WeeklySummaryResponse> {
-    const scope = reportScope(clinicId, actor);
+    const scope = { ...reportScope(clinicId, actor), ...(this.users ? await activePatientScope(this.users) : {}) };
     const period = reportPeriod();
     const [appointments, appointmentsUpdated] = await Promise.all([
       this.weeklyAppointments(scope, period),
@@ -179,7 +182,7 @@ export class AnalyticsService {
     clinicId: string,
     actor: UserActor,
   ): Promise<WeeklyTrendResponse> {
-    const scope = reportScope(clinicId, actor);
+    const scope = { ...reportScope(clinicId, actor), ...(this.users ? await activePatientScope(this.users) : {}) };
     const period = reportPeriod();
     const records = await this.weeklyAppointments(scope, period);
     const appointments = Array<number>(7).fill(0);
@@ -211,7 +214,7 @@ export class AnalyticsService {
     clinicId: string,
     actor: UserActor,
   ): Promise<DailyQueueResponse[]> {
-    const scope = reportScope(clinicId, actor);
+    const scope = { ...reportScope(clinicId, actor), ...(this.users ? await activePatientScope(this.users) : {}) };
     const period = reportPeriod();
     const queue = await this.appointmentModel
       .find({

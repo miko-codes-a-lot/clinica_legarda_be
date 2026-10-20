@@ -1,3 +1,4 @@
+import { User, UserSchema } from '../users/entities/user.entity';
 import { Module } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
@@ -18,6 +19,7 @@ import { AuthModule } from 'src/auth/auth.module';
 @Module({
   imports: [
     MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
       { name: Notification.name, schema: NotificationSchema },
       { name: Appointment.name, schema: AppointmentSchema },
     ]),
