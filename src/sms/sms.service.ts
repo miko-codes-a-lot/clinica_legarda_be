@@ -13,7 +13,7 @@ const MANILA_OFFSET = 8 * 60 * 60 * 1000;
 // Same wording as the appointment emails.
 const COPY: Record<AppointmentEmailKind, { heading: string; message: string }> = {
   confirmed: { heading: 'Your appointment is confirmed', message: 'The clinic has confirmed your appointment.' },
-  rescheduled: { heading: 'Your appointment was rescheduled', message: 'Clinic staff rescheduled your appointment. The revised appointment is pending confirmation.' },
+  rescheduled: { heading: 'Your appointment was rescheduled', message: 'Clinic staff rescheduled your appointment. Sign in to review the revised schedule and latest appointment status.' },
   rejected: { heading: 'Your appointment request was declined', message: 'Your appointment request has been declined. Please contact the clinic to discuss another schedule.' },
   cancelled: { heading: 'Your appointment was cancelled', message: 'Your appointment has been cancelled. This time is no longer reserved for you.' },
   disrupted: { heading: 'Your appointment needs a new schedule', message: 'Dentist or clinic availability has changed. Your appointment needs a new schedule. Please contact the clinic; your existing appointment has not been automatically moved or cancelled.' },

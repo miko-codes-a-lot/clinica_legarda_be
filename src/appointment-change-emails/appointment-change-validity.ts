@@ -12,5 +12,5 @@ export function changeStillApplies(claimed: AppointmentChangeEmail, current: App
     current.patient.toString() === claimed.patient.toString() && current.clinic.toString() === claimed.clinic.toString() &&
     (claimed.kind === 'confirmed' ? current.status === 'confirmed' && !current.disruption &&
       reservationDeadline(current.date, current.startTime).getTime() > Date.now()
-      : claimed.kind === 'rescheduled' ? current.status === 'pending' : !!current.disruption && ['pending', 'confirmed'].includes(current.status));
+      : claimed.kind === 'rescheduled' ? ['pending', 'confirmed'].includes(current.status) : !!current.disruption && ['pending', 'confirmed'].includes(current.status));
 }

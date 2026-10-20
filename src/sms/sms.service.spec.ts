@@ -56,7 +56,7 @@ describe('Appointment SMS', () => {
     expect(request().message).toBe([
       'R. Nañez Dental Clinic',
       'Your appointment was rescheduled',
-      'Clinic staff rescheduled your appointment. The revised appointment is pending confirmation.',
+      'Clinic staff rescheduled your appointment. Sign in to review the revised schedule and latest appointment status.',
       'Patient: Alice Child',
       'Clinic: Test Clinic',
       'Address: 12 Test St',

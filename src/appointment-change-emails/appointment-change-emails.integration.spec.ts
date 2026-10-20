@@ -130,6 +130,21 @@ const uri = process.env.TEST_CHANGE_EMAIL_MONGO_URI;
     expect(await outbox.countDocuments()).toBe(0);
   });
 
+  it('delivers a staff reschedule even when it is confirmed before the notice worker runs', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-18T00:00:00Z').getTime());
+    const appointment = await book();
+    await service.reschedule(appointment.id, reschedule, actor());
+    await service.approve(appointment.id, actor());
+    await worker().sendPending();
+    await worker().sendPending();
+    expect(send).toHaveBeenCalledWith('patient@clinic-mail.ph', expect.objectContaining({
+      kind: 'rescheduled', reason: reschedule.reason,
+      previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' },
+    }));
+    expect(send.mock.calls.filter(([, notice]) => notice.kind === 'rescheduled')).toHaveLength(1);
+    expect(await outbox.countDocuments({ kind: 'rescheduled', sentAt: { $exists: true } })).toBe(1);
+  });
+
   it('also queues a staff edit that changes a pending appointment schedule without copying clinical notes', async () => {
     const appointment = await book();
     await service.update(appointment.id, { ...fixture, services: [fixture.service], date: reschedule.date,

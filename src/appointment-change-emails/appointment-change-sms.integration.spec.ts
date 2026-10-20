@@ -89,6 +89,18 @@ const uri = process.env.TEST_CHANGE_SMS_MONGO_URI;
     expect(retained?.smsSkippedAt).toBeUndefined();
   });
 
+  it('texts a reschedule once even when the revised appointment is already confirmed', async () => {
+    const appointment = await confirmed();
+    await event({ appointment: appointment._id, kind: 'rescheduled',
+      schedule: { date: '2026-10-21', startTime: '09:00', endTime: '09:30' },
+      previousSchedule: { date: '2026-10-20', startTime: '10:00', endTime: '10:30' } });
+    await worker().sendPending();
+    await worker().sendPending();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('+639171234567', expect.objectContaining({ kind: 'rescheduled' }));
+    expect(await outbox.countDocuments({ kind: 'rescheduled', smsSentAt: { $exists: true } })).toBe(1);
+  });
+
   it.each([undefined, '', '12345', '+639171234567,+639181234567'])('skips a patient whose mobile number is %p, leaving email delivery untouched', async (mobileNumber) => {
     await users.collection.updateOne({ _id: new Types.ObjectId(fixture.patient) }, mobileNumber === undefined ? { $unset: { mobileNumber: 1 } } : { $set: { mobileNumber } });
     const queued = await event();
