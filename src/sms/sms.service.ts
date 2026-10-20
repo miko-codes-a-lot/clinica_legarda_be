@@ -49,8 +49,11 @@ export class SmsService {
 
   async sendAppointmentChange(to: string, change: AppointmentChangeMessage): Promise<void> {
     this.ensureSendingAvailable(to);
-    const { heading, message } = COPY[change.kind];
-    const rescheduled = change.kind === 'rescheduled';
+    const confirmedReschedule = change.kind === 'confirmed' && !!change.previousSchedule;
+    const { heading, message } = confirmedReschedule ? {
+      heading: 'Your appointment has been rescheduled and confirmed', message: 'The clinic has approved your revised appointment schedule.',
+    } : COPY[change.kind];
+    const rescheduled = change.kind === 'rescheduled' || confirmedReschedule;
     const lines = [CLINIC_NAME, heading, message];
     if (change.patientName) lines.push(`Patient: ${change.patientName}`);
     lines.push(`Clinic: ${change.clinicName}`);

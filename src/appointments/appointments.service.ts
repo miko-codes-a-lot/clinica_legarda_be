@@ -246,21 +246,22 @@ export class AppointmentsService {
         );
         const validated = await this.scheduling.validate(request, session, id);
         await this.validateCareCase(request.careCase, validated, session);
+        const scheduleChanged = current.date.getTime() !== validated.date.getTime() || current.startTime !== validated.startTime ||
+          current.endTime !== validated.endTime || !sameId(current.clinic, validated.clinic) || !sameId(current.dentist, validated.dentist);
+        const staffReschedule = scheduleChanged && actor.role !== 'user';
         await this.writeCurrent(
           current,
           {
-            $set: { ...request, ...validated, referral: referral || null },
-            $unset: { disruption: 1 },
+            $set: { ...request, ...validated, referral: referral || null,
+              ...(staffReschedule ? { pendingRescheduleNotice: this.rescheduleNotice(current, validated.patient) } : {}) },
+            $unset: { disruption: 1,
+              ...(!staffReschedule && (scheduleChanged || !sameId(current.patient, validated.patient)) ? { pendingRescheduleNotice: 1 } : {}) },
             $push: {
               history: this.historyEntry('Appointment details updated.', actor),
             },
           },
           session,
         );
-        const scheduleChanged = current.date.getTime() !== validated.date.getTime() || current.startTime !== validated.startTime ||
-          current.endTime !== validated.endTime || !sameId(current.clinic, validated.clinic) || !sameId(current.dentist, validated.dentist);
-        if (scheduleChanged) await this.queueChangeEmail(current, 'rescheduled', this.emailSchedule(validated), actor, session, undefined,
-          { patient: validated.patient, clinic: validated.clinic });
       },
     );
     return this.findOne(id, actor);
@@ -344,8 +345,9 @@ export class AppointmentsService {
             startTime: validated.startTime,
             endTime: validated.endTime,
             status: AppointmentStatus.PENDING,
+            ...(actor.role !== 'user' ? { pendingRescheduleNotice: this.rescheduleNotice(current, request.patient, dto.reason) } : {}),
           },
-          $unset: { disruption: 1 },
+          $unset: { disruption: 1, ...(actor.role === 'user' ? { pendingRescheduleNotice: 1 } : {}) },
           $push: {
             history: this.historyEntry(
               'Appointment rescheduled.',
@@ -356,7 +358,6 @@ export class AppointmentsService {
         },
         session,
       );
-      await this.queueChangeEmail(current, 'rescheduled', this.emailSchedule(validated), actor, session, dto.reason);
     });
     return this.findOne(id, actor);
   }
@@ -509,12 +510,15 @@ export class AppointmentsService {
         current,
         {
           $set: { status },
+          $unset: { pendingRescheduleNotice: 1 },
           $push: { history: this.historyEntry(historyAction, actor, reason) },
         },
         session,
       );
       if ([AppointmentStatus.CONFIRMED, AppointmentStatus.REJECTED, AppointmentStatus.CANCELLED].includes(status)) {
-        await this.queueChangeEmail(current, status as 'confirmed' | 'rejected' | 'cancelled', this.emailSchedule(current), actor, session, reason);
+        const reschedule = status === AppointmentStatus.CONFIRMED ? current.pendingRescheduleNotice : undefined;
+        await this.queueChangeEmail(current, status as 'confirmed' | 'rejected' | 'cancelled', this.emailSchedule(current), actor, session,
+          reschedule?.reason ?? reason, reschedule?.previousSchedule);
       }
     });
     return this.findOne(id, actor);
@@ -532,15 +536,26 @@ export class AppointmentsService {
     return { date: appointment.date.toISOString().slice(0, 10), startTime: appointment.startTime, endTime: appointment.endTime };
   }
 
-  private async queueChangeEmail(current: AppointmentDocument, kind: 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled',
+  private rescheduleNotice(current: Appointment, patient: string, reason?: string) {
+    const samePatient = sameId(current.patient, patient);
+    const retainedReason = reason ?? (samePatient ? current.pendingRescheduleNotice?.reason : undefined);
+    return {
+      ...(samePatient ? {
+        previousSchedule: current.pendingRescheduleNotice?.previousSchedule ?? this.emailSchedule(current),
+      } : {}),
+      ...(retainedReason !== undefined ? { reason: retainedReason.trim() } : {}),
+    };
+  }
+
+  private async queueChangeEmail(current: AppointmentDocument, kind: 'confirmed' | 'rejected' | 'cancelled',
     schedule: { date: string; startTime: string; endTime: string }, actor: UserActor, session: ClientSession, reason?: string,
-    target?: { patient: string; clinic: string }) {
+    previousSchedule?: { date: string; startTime: string; endTime: string }) {
     if ((actor.role === 'user' && kind !== 'cancelled') || !this.changeEmailOutbox) return;
     await this.changeEmailOutbox.create([{
       eventKey: `${current._id.toString()}:${current.history.length + 1}:${kind}`,
-      appointment: current._id, patient: new Types.ObjectId(target?.patient ?? referenceId(current.patient)),
-      clinic: new Types.ObjectId(target?.clinic ?? referenceId(current.clinic)), kind, schedule,
-      ...(kind === 'rescheduled' && (!target || sameId(current.patient, target.patient)) ? { previousSchedule: this.emailSchedule(current) } : {}), reason: reason?.trim(),
+      appointment: current._id, patient: new Types.ObjectId(referenceId(current.patient)),
+      clinic: new Types.ObjectId(referenceId(current.clinic)), kind, schedule,
+      ...(previousSchedule ? { previousSchedule } : {}), reason: reason?.trim(),
     }], { session });
   }
 
@@ -701,6 +716,7 @@ export class AppointmentsService {
       async (session) => {
         const current = await this.appointmentModel
           .findById(id)
+          .select('+pendingRescheduleNotice')
           .session(session)
           .exec();
         if (!current)

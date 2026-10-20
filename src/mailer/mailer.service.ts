@@ -67,7 +67,8 @@ export class MailerService {
     };
     const schedule = (value: Pick<AppointmentReminderEmail, 'date' | 'startTime' | 'endTime'>) =>
       `${date(value.date)} · ${time(value.startTime)} – ${time(value.endTime)} (Philippine time)`;
-    const rescheduled = change.kind === 'rescheduled';
+    const confirmedReschedule = change.kind === 'confirmed' && !!change.previousSchedule;
+    const rescheduled = change.kind === 'rescheduled' || confirmedReschedule;
     const copy: Record<AppointmentEmailKind, { heading: string; subject: string; message: string }> = {
       confirmed: { heading: 'Your appointment is confirmed', subject: 'Appointment confirmed', message: 'The clinic has confirmed your appointment.' },
       rescheduled: { heading: 'Your appointment was rescheduled', subject: 'Appointment rescheduled', message: 'Clinic staff rescheduled your appointment. Sign in to review the revised schedule and latest appointment status.' },
@@ -75,7 +76,10 @@ export class MailerService {
       cancelled: { heading: 'Your appointment was cancelled', subject: 'Appointment cancelled', message: 'Your appointment has been cancelled. This time is no longer reserved for you.' },
       disrupted: { heading: 'Your appointment needs a new schedule', subject: 'Appointment schedule needs attention', message: 'Dentist or clinic availability has changed. Your appointment needs a new schedule. Please contact the clinic; your existing appointment has not been automatically moved or cancelled.' },
     };
-    const { heading, subject, message } = copy[change.kind];
+    const { heading, subject, message } = confirmedReschedule ? {
+      heading: 'Your appointment has been rescheduled and confirmed', subject: 'Appointment rescheduled and confirmed',
+      message: 'The clinic has approved your revised appointment schedule.',
+    } : copy[change.kind];
     const changed = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' }).format(change.changedAt);
     const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172a2a;line-height:1.6">
       <h1>${heading}</h1><p>This update was made on ${changed} (Philippine time).</p>

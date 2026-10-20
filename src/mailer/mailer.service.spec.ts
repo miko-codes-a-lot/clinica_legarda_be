@@ -95,6 +95,23 @@ describe('OTP email identity', () => {
     expect(raw).toContain('&lt;script&gt;Moved&lt;/script&gt;'); expect(raw).not.toContain('<script>');
   });
 
+  it('combines an approved reschedule into one message with both schedules, escaped reason and arrival deadline', async () => {
+    await new MailerService().sendAppointmentChange('patient@clinic-mail.ph', {
+      kind: 'confirmed', clinicName: 'Clinic', clinicAddress: '', date: '2026-10-20', startTime: '11:00', endTime: '11:30',
+      previousSchedule: { date: '2026-10-19', startTime: '09:30', endTime: '10:00' }, reason: '<b>Schedule changed</b>',
+      changedAt: new Date('2026-10-18T00:00:00Z'),
+    });
+    const raw = Buffer.from(send.mock.calls[0][0].requestBody.raw, 'base64url').toString('utf8');
+    const subject = raw.match(/^Subject: =\?UTF-8\?B\?([^?]+)\?=$/m)?.[1];
+    expect(Buffer.from(subject || '', 'base64').toString('utf8')).toContain('rescheduled and confirmed');
+    expect(raw).toContain('rescheduled and confirmed');
+    expect(raw).toContain('Previous schedule'); expect(raw).toContain('Revised schedule');
+    expect(raw).toContain('October 19, 2026'); expect(raw).toContain('October 20, 2026');
+    expect(raw).toContain('&lt;b&gt;Schedule changed&lt;/b&gt;'); expect(raw).not.toContain('<b>Schedule changed</b>');
+    expect(raw).toContain('11:20 AM'); expect(raw).toContain('No-show');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('emails an appointment rejection without implying it is still booked', async () => {
     send.mockResolvedValue({});
     await new MailerService().sendAppointmentChange('patient@clinic-mail.ph', { kind: 'rejected', clinicName: 'Clinic', clinicAddress: '',

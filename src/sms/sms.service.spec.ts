@@ -67,6 +67,19 @@ describe('Appointment SMS', () => {
     ].join('\n'));
   });
 
+  it('combines an approved reschedule into one text with old/new times, reason and the new arrival deadline', async () => {
+    await new SmsService().sendAppointmentChange('09171234567', {
+      ...appointment, kind: 'confirmed', changedAt, reason: 'Dentist availability changed',
+      previousSchedule: { date: '2026-10-19', startTime: '13:30', endTime: '14:00' },
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(request().message).toContain('rescheduled and confirmed');
+    expect(request().message).toContain('Previous schedule: October 19, 2026, 1:30 PM - 2:00 PM');
+    expect(request().message).toContain('Revised schedule: October 21, 2026, 9:00 AM - 9:30 AM');
+    expect(request().message).toContain('Reason: Dentist availability changed');
+    expect(request().message).toContain('9:20 AM'); expect(request().message).toContain('No-show');
+  });
+
   it('states the exact 20-minute arrival deadline in a confirmation, and only there', async () => {
     const sms = new SmsService();
     await sms.sendAppointmentChange('+639171234567', { ...appointment, kind: 'confirmed', changedAt });

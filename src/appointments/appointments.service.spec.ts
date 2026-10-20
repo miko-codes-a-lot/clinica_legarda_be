@@ -50,7 +50,7 @@ describe('Appointment changes', () => {
       { provide: getModelToken(Visit.name), useValue: { exists: () => ({ session: async () => activeVisit ? {} : null }) } },
       { provide: getModelToken(Appointment.name), useValue: {
         findById: () => {
-          const query = { session: () => query, populate: () => query, exec: async () => current };
+          const query = { select: () => query, session: () => query, populate: () => query, exec: async () => current };
           return query;
         }, findOne, findByIdAndUpdate: update, findOneAndUpdate: update,
       } },
