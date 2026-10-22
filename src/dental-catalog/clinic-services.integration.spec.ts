@@ -135,17 +135,17 @@ isolated('Clinic-specific services', () => {
     await put(new Types.ObjectId().toHexString(), { name: 'Missing service', duration: 30, clinics: [fixture.a] }, 'super-admin').expect(404);
   });
 
-  it('restricts global reason management to staff while retaining booking reads', async () => {
-    const reason = await reasons.create({ code: 'FIXTURE_REASON', label: 'Fixture reason' });
-    await request(app.getHttpServer()).get('/reasons').set('x-role', 'user').expect(200);
-    for (const role of ['user', 'dentist']) {
-      await request(app.getHttpServer()).post('/reasons').set('x-role', role).send({ code: 'FORGED', label: 'Forged' }).expect(403);
-      await request(app.getHttpServer()).put(`/reasons/${reason.id}`).set('x-role', role).send({ label: 'Forged' }).expect(403);
-      await request(app.getHttpServer()).patch(`/reasons/${reason.id}/toggle`).set('x-role', role).expect(403);
+  it('retains inactive historical reason labels while refusing management requests', async () => {
+    const reason = await reasons.create({ code: 'FIXTURE_REASON', label: 'Fixture reason', isActive: false });
+    const result = await request(app.getHttpServer()).get('/reasons').set('x-role', 'user').expect(200);
+    expect(result.body).toEqual([expect.objectContaining({ code: 'FIXTURE_REASON', label: 'Fixture reason' })]);
+    for (const role of ['user', 'dentist', 'admin', 'super-admin']) {
+      await request(app.getHttpServer()).post('/reasons').set('x-role', role).send({ code: 'FORGED', label: 'Forged' }).expect(404);
+      await request(app.getHttpServer()).put(`/reasons/${reason.id}`).set('x-role', role).send({ label: 'Forged' }).expect(404);
+      await request(app.getHttpServer()).patch(`/reasons/${reason.id}/toggle`).set('x-role', role).expect(404);
     }
-    await request(app.getHttpServer()).put(`/reasons/${reason.id}`).set('x-role', 'super-admin').send({ label: 'Staff revision' }).expect(200);
-    expect((await reasons.findById(reason.id))?.label).toBe('Staff revision');
-    expect((await reasons.findById(reason.id))?.isActive).toBe(true);
+    expect((await reasons.findById(reason.id))?.label).toBe('Fixture reason');
+    expect((await reasons.findById(reason.id))?.isActive).toBe(false);
   });
 
   const booking = (services: string[]) => ({ dentist: fixture.dentist, patient: fixture.patient, clinic: fixture.a, date: new Date('2030-10-14'), startTime: '09:00', endTime: '10:00', services });
