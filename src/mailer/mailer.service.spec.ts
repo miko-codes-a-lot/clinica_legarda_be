@@ -161,6 +161,21 @@ describe('OTP email identity', () => {
     expect(accepted).toContain('11:20 AM');expect(accepted).not.toContain('not confirmed until');
   });
 
+  it('describes protected ongoing care as manual review without a revised schedule or deadline', async () => {
+    await new MailerService().sendAppointmentChange('patient@clinic-mail.ph', {
+      kind: 'disrupted', protectedCare: true, clinicName: 'Test Clinic', clinicAddress: '',
+      date: '2026-11-02', startTime: '10:00', endTime: '10:30',
+      changedAt: new Date('2026-10-22'), reason: 'Equipment repairs',
+    });
+    const raw = Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8');
+    expect(raw).toContain('ongoing care needs review');
+    expect(raw).toContain('will not automatically cancel due to the closure');
+    expect(raw).toContain('Appointment schedule');
+    expect(raw).not.toContain('Revised schedule');
+    expect(raw).not.toContain('needs a new schedule');
+    expect(raw).not.toContain('Please propose a replacement by');
+  });
+
   it('distinguishes a patient replacement request, clinic acceptance and a fresh replacement deadline', async () => {
     const provider = new MailerService();
     const change = { clinicName: 'Test Clinic', clinicAddress: '', date: '2026-11-04', startTime: '11:00', endTime: '11:30', changedAt: new Date('2026-10-22'),

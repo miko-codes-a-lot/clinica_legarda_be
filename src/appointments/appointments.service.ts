@@ -656,7 +656,7 @@ export class AppointmentsService {
         if (!current || !sameId(current.patient, row.patient) || !sameId(current.dentist, row.dentist)) return false;
         const noProposal = current.status === AppointmentStatus.NEEDS_RESCHEDULING && !current.rescheduleProposal &&
           !!current.closureRescheduling && closureReschedulingExpired(current.closureRescheduling, now);
-        const unanswered = current.status === AppointmentStatus.PENDING && !!current.rescheduleProposal && !current.disruption && appointmentStart(current.date, current.startTime).getTime() <= now.getTime();
+        const unanswered = current.status === AppointmentStatus.PENDING && !!current.rescheduleProposal && appointmentStart(current.date, current.startTime).getTime() <= now.getTime();
         if (!noProposal && !unanswered) return false;
         if (!await this.userModel.exists({ _id: current.patient, ...ACTIVE_ACCOUNT, role: 'user' }).session(session)) return false;
         if (this.visits && await this.visits.exists({ appointment: current._id, state: { $in: ['waiting', 'in_progress'] } }).session(session)) return false;

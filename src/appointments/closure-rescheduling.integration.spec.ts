@@ -106,6 +106,16 @@ const uri = process.env.TEST_CLOSURE_RESCHEDULE_MONGO_URI;
     expect(await service.expireRescheduleProposals(new Date('2026-11-04T03:00:00Z'))).toBe(1);
     expect((await appointments.findById(offered._id))?.status).toBe('cancelled');
   });
+  it('expires an unanswered closure proposal later affected by dentist availability', async () => {
+    const offered = await service.reschedule(f.appointment, proposal(), actor('dentist'));
+    await appointments.updateOne({ _id: offered._id }, { disruption: {
+      closures: [], dentistAvailability: [f.other], flaggedAt: now, message: 'Dentist availability changed',
+    } });
+    expect(await service.expireRescheduleProposals(new Date('2026-11-04T03:00:00Z'))).toBe(1);
+    expect((await appointments.findById(offered._id))?.status).toBe('cancelled');
+    expect(await service.expireRescheduleProposals(new Date('2026-11-04T03:00:00Z'))).toBe(0);
+    expect(await outbox.countDocuments({ kind: 'cancelled' })).toBe(1);
+  });
   it('keeps original participants, parent access and explicit staff-recorded patient agreement', async () => {
     await users.updateOne({ _id: f.patient }, { isDependent: true, loginEnabled: false, guardian: f.other });
     await users.updateOne({ _id: f.other }, { otpVerifiedAt: now });
