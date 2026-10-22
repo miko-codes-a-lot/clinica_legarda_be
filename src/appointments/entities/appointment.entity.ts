@@ -56,6 +56,15 @@ export class ProposalSchedule {
 }
 
 @Schema({ _id: false })
+export class ClosureRescheduling {
+  @Prop({ required: true }) originalStatus: string;
+  @Prop({ type: ProposalSchedule, required: true }) originalSchedule: ProposalSchedule;
+  @Prop({ required: true }) enteredAt: Date;
+  @Prop() expiresAt?: Date;
+  @Prop({ type: [String], required: true }) reasons: string[];
+}
+
+@Schema({ _id: false })
 export class RescheduleProposal {
   @Prop({ required: true }) id: string;
   @Prop({ required: true }) proposedAt: Date;
@@ -103,6 +112,7 @@ export class Appointment {
 
   @Prop({ default: 0 }) scheduleVersion: number;
   @Prop({ type: RescheduleProposal }) rescheduleProposal?: RescheduleProposal;
+  @Prop({ type: ClosureRescheduling }) closureRescheduling?: ClosureRescheduling;
 
   @Prop({ default: false })
   isWalkIn: boolean;
