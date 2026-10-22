@@ -63,11 +63,7 @@ export class AppointmentsService {
   ) {}
 
   async create(dto: AppointmentUpsertDto, actor: UserActor) {
-    // Only a validated, sender-owned referral may book another dentist.
-    // General appointment read/edit/decision authorization remains unchanged.
-    const dentistReferral = actor.role === 'dentist' && !sameId(actor.sub, dto.dentist) && !!dto.referral;
-    if (!dentistReferral) authorizeAppointment(actor, dto);
-    if (dentistReferral && dto.careCase) throw new BadRequestException('A referred appointment cannot reuse the source treatment case.');
+    authorizeAppointment(actor, dto);
     await this.authorizePatient(actor, dto.patient);
     if (
       actor.role === 'dentist' &&
@@ -81,9 +77,8 @@ export class AppointmentsService {
       );
     }
     const request = this.writeFields(dto, actor);
-    if (dentistReferral) request.notes.clinicNotes = '';
     const id = await this.scheduling.withLocks(
-      [request.dentist, request.patient, ...(actor.role === 'user' || dentistReferral ? [actor.sub] : [])],
+      [request.dentist, request.patient, ...(actor.role === 'user' ? [actor.sub] : [])],
       async (session) => {
         await this.requireBookablePatient(request.patient, actor, session);
         const validated = await this.scheduling.validate(request, session);
@@ -93,8 +88,6 @@ export class AppointmentsService {
           validated.patient,
           actor,
           session,
-          undefined,
-          dentistReferral,
         );
         const [created] = await this.appointmentModel.create(
           [
@@ -112,14 +105,6 @@ export class AppointmentsService {
         return created.id as string;
       },
     );
-    if (dentistReferral) {
-      // The sender may view referral scheduling context, never the receiver's chart/history.
-      const created = await this.populate(this.appointmentModel.findById(id).select(
-        '_id clinic dentist patient services date startTime endTime status notes.patientNotes referral',
-      )).lean().exec();
-      if (!created) throw new NotFoundException('Appointment not found.');
-      return created;
-    }
     return this.findOne(id, actor);
   }
 
@@ -750,7 +735,6 @@ export class AppointmentsService {
     actor: UserActor,
     session: ClientSession,
     appointmentId?: string,
-    requireSender = false,
   ) {
     if (!value) return undefined;
     const id = referenceId(value);
@@ -759,11 +743,6 @@ export class AppointmentsService {
       .session(session)
       .exec();
     if (!referral) throw new BadRequestException('Referral not found.');
-    if (requireSender && (
-      !sameId(referral.fromDoctorId, actor.sub) ||
-      !await this.userModel.exists({ _id: referenceId(actor.sub), ...ACTIVE_ACCOUNT, role: 'dentist', status: 'confirmed' }).session(session) ||
-      !await this.appointmentModel.exists({ patient: referenceId(patient), dentist: referenceId(actor.sub), clinic: referral.fromClinicId }).session(session)
-    )) throw new ForbiddenException('Only the established referring dentist may schedule this referral.');
     const linked = await this.appointmentModel
       .findOne({ referral: id })
       .session(session)
