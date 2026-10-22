@@ -12,7 +12,7 @@ export function enterClosureRescheduling(
   current: { date: Date; startTime: string; endTime: string; status: string; closureRescheduling?: ClosureReschedulingContext },
   reason: string,
   now: Date,
-): ClosureReschedulingContext {
+): ClosureReschedulingContext & { expiresAt: Date } {
   const previous = current.closureRescheduling;
   return {
     originalStatus: previous?.originalStatus ?? current.status,

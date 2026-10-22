@@ -152,4 +152,20 @@ describe('Appointment SMS', () => {
     expect(accepted).toContain('11:20 AM');expect(accepted).not.toContain('not confirmed until');
   });
 
+  it('distinguishes a patient replacement request, clinic acceptance and a fresh replacement deadline', async () => {
+    const provider = new SmsService();
+    const change = { clinicName: 'Test Clinic', clinicAddress: '', date: '2026-11-04', startTime: '11:00', endTime: '11:30', changedAt: new Date('2026-10-22'),
+      previousSchedule: { date: '2026-11-02', startTime: '10:00', endTime: '10:30' } };
+    await provider.sendAppointmentChange('09171234567', { ...change, kind: 'rescheduled', proposalSide: 'patient' });
+    expect(request().message).toContain('awaiting clinic review');
+    expect(request().message).not.toContain('until you agree');
+    await provider.sendAppointmentChange('09171234567', { ...change, kind: 'confirmed', proposalSide: 'patient' });
+    expect(request().message).toContain('clinic accepted your proposed');
+    expect(request().message).not.toContain('Your agreement to the clinic');
+    await provider.sendAppointmentChange('09171234567', { ...change, kind: 'needs_rescheduling', proposalDeadline: new Date('2026-10-29T04:00:00Z'), reason: 'Equipment repairs' });
+    expect(request().message).toContain('October 29, 2026');
+    expect(request().message).toContain('Equipment repairs');
+    expect(request().message).not.toContain('Your appointment was cancelled');
+  });
+
 });

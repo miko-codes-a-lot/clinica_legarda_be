@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, Types } from 'mongoose';
 
-export type AppointmentEmailKind = 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled' | 'disrupted';
+export type AppointmentEmailKind = 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled' | 'disrupted' | 'needs_rescheduling';
 
 @Schema({ _id: false })
 export class AppointmentEmailSchedule {
@@ -17,10 +17,13 @@ export class AppointmentChangeEmail {
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Appointment', required: true }) appointment: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'User', required: true }) patient: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, ref: 'Clinic', required: true }) clinic: Types.ObjectId;
-  @Prop({ enum: ['confirmed', 'rescheduled', 'rejected', 'cancelled', 'disrupted'], required: true }) kind: AppointmentEmailKind;
+  @Prop({ enum: ['confirmed', 'rescheduled', 'rejected', 'cancelled', 'disrupted', 'needs_rescheduling'], required: true }) kind: AppointmentEmailKind;
   @Prop() eventKey?: string;
   @Prop() scheduleVersion?: number;
   @Prop() proposalId?: string;
+  @Prop({ enum: ['patient', 'staff'] }) proposalSide?: 'patient' | 'staff';
+  @Prop() proposalDeadline?: Date;
+  @Prop() protectedCare?: boolean;
   @Prop({ type: AppointmentEmailSchedule, required: true }) schedule: AppointmentEmailSchedule;
   @Prop({ type: AppointmentEmailSchedule }) previousSchedule?: AppointmentEmailSchedule;
   @Prop({ maxlength: 500 }) reason?: string;

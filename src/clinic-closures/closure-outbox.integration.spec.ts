@@ -63,6 +63,10 @@ if (
       endTime: '16:00',
       reason: '  Scheduled equipment maintenance  ',
     });
+    const close = async () => {
+      const input = dto(), preview = await service.preview(actor(), input);
+      return service.create(actor(), { ...input, impactToken: preview.impactToken });
+    };
     const book = (extra = {}) =>
       appointments.create({
         ...id,
@@ -179,7 +183,7 @@ if (
         pending = await book({ status: 'pending', scheduleVersion: 4 });
       await book({ status: 'cancelled' });
       await book({ startTime: '17:00', endTime: '17:30' });
-      const result = await service.create(actor(), dto());
+      const result = await close();
       const events = await outbox.find().sort({ scheduleVersion: 1 }).lean();
       expect(events).toHaveLength(2);
       expect(
@@ -216,7 +220,7 @@ if (
     });
     it('delivers the committed closure snapshot independently through mocked email and SMS once', async () => {
       await book();
-      await service.create(actor(), dto());
+      await close();
       await deliver();
       await deliver();
       for (const send of [emails, sms]) expect(send).toHaveBeenCalledTimes(1);
@@ -245,8 +249,8 @@ if (
     it('duplicate concurrent closures cannot duplicate disruption events or in-app notices', async () => {
       await book();
       const results = await Promise.allSettled([
-        service.create(actor(), dto()),
-        service.create(actor(), dto()),
+        close(),
+        close(),
       ]);
       expect(
         results.filter((result) => result.status === 'fulfilled'),
@@ -262,7 +266,7 @@ if (
       jest
         .spyOn(notices, 'insertMany')
         .mockRejectedValueOnce(new Error('Injected notification failure'));
-      await expect(service.create(actor(), dto())).rejects.toThrow(
+      await expect(close()).rejects.toThrow(
         'Injected notification failure',
       );
       expect(await closures.countDocuments()).toBe(0);
@@ -279,7 +283,7 @@ if (
       jest
         .spyOn(outbox, 'create')
         .mockRejectedValueOnce(new Error('Injected outbox failure'));
-      await expect(service.create(actor(), dto())).rejects.toThrow(
+      await expect(close()).rejects.toThrow(
         'Injected outbox failure',
       );
       expect(await closures.countDocuments()).toBe(0);
@@ -292,7 +296,7 @@ if (
     });
     it('existing workers suppress a stale closure schedule snapshot in both channels', async () => {
       const appointment = await book();
-      await service.create(actor(), dto());
+      await close();
       expect(await outbox.countDocuments()).toBe(1);
       await appointments.updateOne(
         { _id: appointment.id },
@@ -311,7 +315,7 @@ if (
     });
     it('existing workers suppress recipients deleted after closure commit', async () => {
       await book();
-      await service.create(actor(), dto());
+      await close();
       expect(await outbox.countDocuments()).toBe(1);
       await users.updateOne(
         { _id: id.patient },
@@ -331,11 +335,11 @@ if (
         { _id: id.patient },
         { $set: { deletedAt: new Date() } },
       );
-      expect(await service.preview(actor(), dto())).toEqual({
+      expect(await service.preview(actor(), dto())).toMatchObject({
         appointments: [],
         total: 0,
       });
-      const result = await service.create(actor(), dto());
+      const result = await close();
       expect(result.appointments).toEqual([]);
       expect(result.closure.affectedAppointments).toHaveLength(0);
       expect(await outbox.countDocuments()).toBe(0);
@@ -346,7 +350,7 @@ if (
     });
     it('retains the historical closure reference but hides a newly deleted linked patient from closure detail', async () => {
       const appointment = await book(),
-        result = await service.create(actor(), dto());
+        result = await close();
       await users.updateOne(
         { _id: id.patient },
         { $set: { deletedAt: new Date() } },
@@ -362,7 +366,7 @@ if (
     });
     it('does not clear disruption on a deleted patient retained record', async () => {
       const appointment = await book(),
-        result = await service.create(actor(), dto());
+        result = await close();
       await service.reopen(
         actor(),
         result.closure._id.toString(),
@@ -386,7 +390,7 @@ if (
     });
     it('does not enqueue another notice on reopening or explicit disruption resolution', async () => {
       const appointment = await book(),
-        result = await service.create(actor(), dto());
+        result = await close();
       await service.reopen(
         actor(),
         result.closure._id.toString(),
@@ -410,7 +414,7 @@ if (
         notices,
         module.get(EventEmitter2),
       );
-      const result = await legacy.create(actor(), dto());
+      const result = await legacy.create(actor(), { ...dto(), impactToken: (await legacy.preview(actor(), dto())).impactToken });
       expect(result.appointments).toHaveLength(1);
       expect(await notices.countDocuments()).toBe(2);
       expect(await outbox.countDocuments()).toBe(0);

@@ -1,5 +1,6 @@
 import { IsDateString, IsMongoId, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 export class ClinicClosureDto {
+  @IsOptional() @IsString() @Matches(/^[a-f0-9]{64}$/) impactToken?: string;
   @IsMongoId() clinic: string;
   @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) startDate: string;
   @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) endDate: string;

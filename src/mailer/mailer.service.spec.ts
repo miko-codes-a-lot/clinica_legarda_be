@@ -161,4 +161,20 @@ describe('OTP email identity', () => {
     expect(accepted).toContain('11:20 AM');expect(accepted).not.toContain('not confirmed until');
   });
 
+  it('distinguishes a patient replacement request, clinic acceptance and a fresh replacement deadline', async () => {
+    const provider = new MailerService();
+    const change = { clinicName: 'Test Clinic', clinicAddress: '', date: '2026-11-04', startTime: '11:00', endTime: '11:30', changedAt: new Date('2026-10-22'),
+      previousSchedule: { date: '2026-11-02', startTime: '10:00', endTime: '10:30' } };
+    await provider.sendAppointmentChange('patient@clinic-mail.ph', { ...change, kind: 'rescheduled', proposalSide: 'patient' });
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).toContain('awaiting clinic review');
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).not.toContain('until you agree');
+    await provider.sendAppointmentChange('patient@clinic-mail.ph', { ...change, kind: 'confirmed', proposalSide: 'patient' });
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).toContain('clinic accepted your proposed');
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).not.toContain('Your agreement to the clinic');
+    await provider.sendAppointmentChange('patient@clinic-mail.ph', { ...change, kind: 'needs_rescheduling', proposalDeadline: new Date('2026-10-29T04:00:00Z'), reason: 'Equipment repairs' });
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).toContain('October 29, 2026');
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).toContain('Equipment repairs');
+    expect(Buffer.from(send.mock.calls.at(-1)?.[0].requestBody.raw, 'base64url').toString('utf8')).not.toContain('Your appointment was cancelled');
+  });
+
 });

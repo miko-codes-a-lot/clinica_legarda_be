@@ -72,7 +72,7 @@ export class AppointmentChangeEmailsService implements OnApplicationBootstrap, O
           continue;
         }
         await this.mailer.sendAppointmentChange(patient.emailAddress, {
-          kind: claimed.kind, ...(claimed.proposalId ? { responseRequired: true } : {}), patientName: patient.patientName, clinicName: clinic.name, clinicAddress: clinic.address || '',
+          kind: claimed.kind, protectedCare: claimed.protectedCare, proposalSide: claimed.proposalSide, proposalDeadline: claimed.proposalDeadline, ...(claimed.proposalId && claimed.proposalSide !== 'patient' ? { responseRequired: true } : {}), patientName: patient.patientName, clinicName: clinic.name, clinicAddress: clinic.address || '',
           date: claimed.schedule.date, startTime: claimed.schedule.startTime, endTime: claimed.schedule.endTime,
           ...(claimed.kind === 'confirmed' ? { arrivalDeadline: reservationDeadline(new Date(claimed.schedule.date), claimed.schedule.startTime) } : {}),
           ...(claimed.previousSchedule ? { previousSchedule: {

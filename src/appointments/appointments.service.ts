@@ -1,3 +1,4 @@
+import { closureReschedulingExpired, enterClosureRescheduling } from './closure-rescheduling.rules';
 import { ACTIVE_ACCOUNT, activePatientScope, requireActivePatient } from '../users/patient-visibility';
 import { randomUUID } from 'crypto';
 import { RescheduleResponseDto } from './dto/reschedule-response.dto';
@@ -343,7 +344,11 @@ export class AppointmentsService {
       this.requireStatus(current, [
         AppointmentStatus.PENDING,
         AppointmentStatus.CONFIRMED,
+        AppointmentStatus.NEEDS_RESCHEDULING,
       ]);
+      const closureFlow = !!current.closureRescheduling;
+      if (current.status === AppointmentStatus.NEEDS_RESCHEDULING && (!closureFlow || closureReschedulingExpired(current.closureRescheduling!, new Date(Date.now()))))
+        throw new ConflictException('The seven-day replacement deadline has passed. Contact the clinic to arrange a new booking.');
       await this.requireNoActiveVisit(current, session);
       const request = {
         ...this.scheduleRequest(current),
@@ -357,10 +362,13 @@ export class AppointmentsService {
       this.assertProposal(current, dto.proposalId);
       if (current.rescheduleProposal) this.requireFutureSchedule(current);
       this.requireFutureSchedule(validated);
-      if (current.date.getTime() === validated.date.getTime() && current.startTime === validated.startTime && current.endTime === validated.endTime)
+      if (current.status !== AppointmentStatus.NEEDS_RESCHEDULING && current.date.getTime() === validated.date.getTime() && current.startTime === validated.startTime && current.endTime === validated.endTime)
         throw new BadRequestException('Choose a different appointment time.');
       const version = (current.scheduleVersion ?? 0) + 1;
-      const proposal = actor.role !== 'user' ? this.proposal(current, validated, dto.reason) : undefined;
+      const proposal = actor.role !== 'user' || closureFlow ? {
+        ...this.proposal(current, validated, dto.reason ?? (closureFlow ? 'Replacement requested after clinic closure.' : undefined)),
+        ...(closureFlow ? { origin: 'clinic_closure' as const, proposedBySide: actor.role === 'user' ? 'patient' as const : 'staff' as const, proposedBy: actor.sub } : {}),
+      } : undefined;
       await this.writeCurrent(
         current,
         {
@@ -370,10 +378,10 @@ export class AppointmentsService {
             endTime: validated.endTime,
             status: AppointmentStatus.PENDING, scheduleVersion: version, ...(proposal ? { rescheduleProposal: proposal } : {}),
           },
-          $unset: { disruption: 1, ...(!proposal ? { rescheduleProposal: 1 } : {}) },
+          $unset: { disruption: 1, ...(closureFlow ? { 'closureRescheduling.expiresAt': 1 } : {}), ...(!proposal ? { rescheduleProposal: 1 } : {}) },
           $push: {
             history: this.historyEntry(
-              'Appointment rescheduled.',
+              closureFlow ? 'Replacement schedule proposed after clinic closure.' : 'Appointment rescheduled.',
               actor,
               dto.reason,
             ),
@@ -382,7 +390,7 @@ export class AppointmentsService {
         session,
       );
       if (proposal) await this.queueChangeEmail(current, 'rescheduled', this.emailSchedule(validated), actor, session, proposal.reason, undefined,
-        { version, proposalId: proposal.id, previousSchedule: proposal.previousSchedule });
+        { version, proposalId: proposal.id, previousSchedule: proposal.previousSchedule, proposalSide: proposal.proposedBySide, patientAcceptance: closureFlow && actor.role === 'user' });
     });
     return this.findOne(id, actor);
   }
@@ -468,6 +476,7 @@ export class AppointmentsService {
         if (!current.referral || !sameId(current.referral, referralId))
           throw new ConflictException('Referral link changed.');
         this.requireStatus(current, [AppointmentStatus.PENDING]);
+        if (current.rescheduleProposal?.origin === 'clinic_closure') throw new ConflictException('Respond to the proposed schedule before deciding the referral.');
         await this.writeCurrent(
           current,
           {
@@ -506,22 +515,23 @@ export class AppointmentsService {
       if (status === AppointmentStatus.CANCELLED) this.assertProposal(current, proposalId);
       const allowed =
         status === AppointmentStatus.CANCELLED
-          ? [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]
+          ? [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, AppointmentStatus.NEEDS_RESCHEDULING]
           : status === AppointmentStatus.COMPLETED ||
               status === AppointmentStatus.NO_SHOW
             ? [AppointmentStatus.CONFIRMED]
             : [AppointmentStatus.PENDING];
       this.requireStatus(current, allowed);
       if (status === AppointmentStatus.CANCELLED) {
+        const closureCancellation = !!current.closureRescheduling;
         const staffCancellation = current.status === AppointmentStatus.CONFIRMED &&
           (isAdmin(actor) || actor.role === 'dentist');
         const creator = current.createdBy?.toString() ?? current.history.find(
           entry => entry.action === 'Appointment created.',
         )?.actorId;
-        if (!current.rescheduleProposal && !staffCancellation && (!creator || !Types.ObjectId.isValid(creator) || !sameId(creator, actor.sub))) {
+        if (!closureCancellation && !current.rescheduleProposal && !staffCancellation && (!creator || !Types.ObjectId.isValid(creator) || !sameId(creator, actor.sub))) {
           throw new ForbiddenException('Only the person who created this appointment may cancel it.');
         }
-        if (!current.rescheduleProposal && Date.now() >= appointmentStart(current.date, current.startTime).getTime()) {
+        if (!closureCancellation && !current.rescheduleProposal && Date.now() >= appointmentStart(current.date, current.startTime).getTime()) {
           throw new ConflictException('This appointment has already started. Contact the clinic to resolve its outcome.');
         }
       }
@@ -552,7 +562,7 @@ export class AppointmentsService {
         current,
         {
           $set: { status },
-          $unset: { rescheduleProposal: 1 },
+          $unset: { rescheduleProposal: 1, closureRescheduling: 1, ...(status === AppointmentStatus.CANCELLED && current.closureRescheduling ? { disruption: 1 } : {}) },
           $push: { history: this.historyEntry(historyAction, actor, reason) },
         },
         session,
@@ -580,7 +590,7 @@ export class AppointmentsService {
 
   private proposal(current: Appointment, schedule: Pick<Appointment, 'date' | 'startTime'>, reason?: string) {
     this.requireFutureSchedule(schedule);
-    return { id: randomUUID(), proposedAt: new Date(), previousSchedule: current.rescheduleProposal?.previousSchedule ?? this.emailSchedule(current),
+    return { id: randomUUID(), proposedAt: new Date(Date.now()), previousSchedule: current.rescheduleProposal?.previousSchedule ?? this.emailSchedule(current),
       reason: reason?.trim() || 'Clinic requested a different appointment time.' };
   }
 
@@ -589,42 +599,71 @@ export class AppointmentsService {
       this.requireStatus(current, [AppointmentStatus.PENDING]); this.assertProposal(current, dto.proposalId);
       const proposal = current.rescheduleProposal;
       if (!proposal) throw new ConflictException('There is no active reschedule proposal.');
-      if (actor.role === 'user') {
+      const closureFlow = proposal.origin === 'clinic_closure' && !!current.closureRescheduling;
+      const patientProposal = closureFlow && proposal.proposedBySide === 'patient';
+      const decline = dto.decision === 'decline';
+      if (patientProposal) {
+        if (actor.role === 'user' || dto.method !== 'clinic_review') throw new ForbiddenException('This proposal needs the assigned dentist or clinic administrator to respond.');
+        authorizeAppointment(actor, current, true);
+      } else if (actor.role === 'user') {
         if (dto.method !== 'patient_portal') throw new ForbiddenException('Patients must respond through their own account.');
       } else {
-        if (dto.method === 'patient_portal') throw new ForbiddenException('Record phone or in-person patient agreement; do not accept as the patient.');
+        if (!['phone', 'in_person'].includes(dto.method) || decline) throw new ForbiddenException('This proposal needs the patient response. Record only explicit phone or in-person agreement on their behalf.');
         if (!dto.reason?.trim() || dto.reason.trim().length < 3) throw new BadRequestException('Explain how the patient agreed to this schedule.');
       }
+      if (decline && !closureFlow) throw new BadRequestException('For this appointment, request another time or cancel the proposal.');
       this.requireFutureSchedule(current);
       this.requireResolvedDisruption(current);
       await this.requireBookablePatient(referenceId(current.patient), actor, session);
       await this.requireNoActiveVisit(current, session);
+      if (decline) {
+        const now = new Date(Date.now());
+        const context = enterClosureRescheduling(current, current.closureRescheduling!.reasons.at(-1) ?? 'Clinic closure', now);
+        const version = (current.scheduleVersion ?? 0) + 1;
+        const reason = `Replacement proposal declined${dto.reason?.trim() ? ': ' + dto.reason.trim() : '.'} Closure reason: ${context.reasons.join('; ')}`.slice(0, 500);
+        await this.writeCurrent(current, { $set: { status: AppointmentStatus.NEEDS_RESCHEDULING, closureRescheduling: context, scheduleVersion: version }, $unset: { rescheduleProposal: 1 },
+          $push: { history: this.historyEntry('Replacement schedule declined; appointment needs rescheduling.', actor, reason) } }, session);
+        await this.queueChangeEmail(current, 'needs_rescheduling', this.emailSchedule(current), actor, session, reason, undefined,
+          { version, proposalDeadline: context.expiresAt, patientAcceptance: true });
+        return;
+      }
       const validated = await this.scheduling.validate(this.scheduleRequest(current), session, id);
       await this.validateCareCase(current.careCase?.toString(), validated, session);
-      await this.writeCurrent(current, { $set: { status: AppointmentStatus.CONFIRMED }, $unset: { rescheduleProposal: 1 },
-        $push: { history: this.historyEntry(actor.role === 'user' ? 'Patient accepted the proposed schedule.' :
+      await this.writeCurrent(current, { $set: { status: AppointmentStatus.CONFIRMED }, $unset: { rescheduleProposal: 1, closureRescheduling: 1 },
+        $push: { history: this.historyEntry(patientProposal ? 'Clinic accepted the patient replacement schedule.' : actor.role === 'user' ? 'Patient accepted the proposed schedule.' :
           `Patient agreement recorded (${dto.method === 'phone' ? 'phone' : 'in person'}).`, actor, dto.reason) } }, session);
       await this.queueChangeEmail(current, 'confirmed', this.emailSchedule(current), actor, session, proposal.reason, undefined,
-        { previousSchedule: proposal.previousSchedule, patientAcceptance: actor.role === 'user' });
+        { previousSchedule: proposal.previousSchedule, proposalSide: proposal.proposedBySide, patientAcceptance: actor.role === 'user' });
     });
     return this.findOne(id, actor);
   }
 
   async expireRescheduleProposals(now: Date): Promise<number> {
-    const rows = await this.appointmentModel.find({ status: AppointmentStatus.PENDING, rescheduleProposal: { $exists: true },
-      date: { $lte: new Date(now.getTime() + 8 * 60 * 60_000) }, ...(this.expiryAfterId ? { _id: { $gt: this.expiryAfterId } } : {})
+    const rows = await this.appointmentModel.find({ ...await activePatientScope(this.userModel),
+      $or: [
+        { status: AppointmentStatus.PENDING, rescheduleProposal: { $exists: true }, date: { $lte: new Date(now.getTime() + 8 * 60 * 60_000) } },
+        { status: AppointmentStatus.NEEDS_RESCHEDULING, rescheduleProposal: { $exists: false }, 'closureRescheduling.expiresAt': { $lte: now } },
+      ], ...(this.expiryAfterId ? { _id: { $gt: this.expiryAfterId } } : {})
     }).select('_id patient dentist').sort({ _id: 1 }).limit(100).lean().exec();
     this.expiryAfterId = rows.length === 100 ? rows[rows.length - 1]._id : undefined;
     let expired = 0;
     for (const row of rows) {
-      const changed = await this.scheduling.withLocks([referenceId(row.patient), referenceId(row.dentist)], async session => {
+      // Legacy rows can outlive a dentist account. Cancellation still locks every
+      // surviving participant; unlike a booking, it never needs a missing dentist.
+      const participants = await this.userModel.find({ _id: { $in: [row.patient, row.dentist].filter(Boolean) } }).select('_id').lean().exec();
+      const changed = await this.scheduling.withLocks(participants.map(person => referenceId(person._id)), async session => {
         const current = await this.appointmentModel.findById(row._id).session(session).exec();
-        if (!current || current.status !== AppointmentStatus.PENDING || !current.rescheduleProposal ||
-          !sameId(current.patient, row.patient) || !sameId(current.dentist, row.dentist) || appointmentStart(current.date, current.startTime).getTime() > now.getTime()) return false;
-        await this.requireNoActiveVisit(current, session);
-        const reason = 'Automatically cancelled because there was no response to the proposed schedule before its start time.';
-        await this.writeCurrent(current, { $set: { status: AppointmentStatus.CANCELLED }, $unset: { rescheduleProposal: 1 },
-          $push: { history: { action: 'Unanswered reschedule proposal automatically cancelled.', reason, actorRole: 'system', actorName: 'System', timestamp: now } } }, session);
+        if (!current || !sameId(current.patient, row.patient) || !sameId(current.dentist, row.dentist)) return false;
+        const noProposal = current.status === AppointmentStatus.NEEDS_RESCHEDULING && !current.rescheduleProposal &&
+          !!current.closureRescheduling && closureReschedulingExpired(current.closureRescheduling, now);
+        const unanswered = current.status === AppointmentStatus.PENDING && !!current.rescheduleProposal && !current.disruption && appointmentStart(current.date, current.startTime).getTime() <= now.getTime();
+        if (!noProposal && !unanswered) return false;
+        if (!await this.userModel.exists({ _id: current.patient, ...ACTIVE_ACCOUNT, role: 'user' }).session(session)) return false;
+        if (this.visits && await this.visits.exists({ appointment: current._id, state: { $in: ['waiting', 'in_progress'] } }).session(session)) return false;
+        const reason = (noProposal ? `Automatically cancelled because no replacement was proposed within seven days. Closure reason: ${current.closureRescheduling!.reasons.join('; ')}` :
+          'Automatically cancelled because there was no response to the proposed schedule before its start time.').slice(0, 500);
+        await this.writeCurrent(current, { $set: { status: AppointmentStatus.CANCELLED }, $unset: { rescheduleProposal: 1, closureRescheduling: 1, ...(current.closureRescheduling ? { disruption: 1 } : {}) },
+          $push: { history: { action: noProposal ? 'Closure replacement deadline expired; appointment automatically cancelled.' : 'Unanswered reschedule proposal automatically cancelled.', reason, actorRole: 'system', actorName: 'System', timestamp: now } } }, session);
         await this.queueChangeEmail(current, 'cancelled', this.emailSchedule(current), { sub: 'system', role: 'system' }, session, reason);
         return true;
       });
@@ -645,15 +684,16 @@ export class AppointmentsService {
     return { date: appointment.date.toISOString().slice(0, 10), startTime: appointment.startTime, endTime: appointment.endTime };
   }
 
-  private async queueChangeEmail(current: AppointmentDocument, kind: 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled',
+  private async queueChangeEmail(current: AppointmentDocument, kind: 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled' | 'needs_rescheduling',
     schedule: { date: string; startTime: string; endTime: string }, actor: UserActor, session: ClientSession, reason?: string,
     target?: { patient: string; clinic: string },
-    notice?: { version?: number; proposalId?: string; previousSchedule?: { date: string; startTime: string; endTime: string }; patientAcceptance?: boolean }) {
+    notice?: { version?: number; proposalId?: string; previousSchedule?: { date: string; startTime: string; endTime: string }; patientAcceptance?: boolean; proposalSide?: 'patient' | 'staff'; proposalDeadline?: Date }) {
     if ((actor.role === 'user' && kind !== 'cancelled' && !notice?.patientAcceptance) || !this.changeEmailOutbox) return;
     await this.changeEmailOutbox.create([{
       eventKey: `${current._id.toString()}:${current.history.length + 1}:${kind}`,
       appointment: current._id, patient: new Types.ObjectId(target?.patient ?? referenceId(current.patient)),
       clinic: new Types.ObjectId(target?.clinic ?? referenceId(current.clinic)), kind, schedule,
+      proposalSide: notice?.proposalSide, proposalDeadline: notice?.proposalDeadline,
       scheduleVersion: notice?.version ?? current.scheduleVersion ?? 0, ...(notice?.proposalId ? { proposalId: notice.proposalId } : {}),
       ...(notice?.previousSchedule ? { previousSchedule: notice.previousSchedule } :
         kind === 'rescheduled' && (!target || sameId(current.patient, target.patient)) ? { previousSchedule: this.emailSchedule(current) } : {}), reason: reason?.trim(),

@@ -67,6 +67,9 @@ export class ClosureRescheduling {
 @Schema({ _id: false })
 export class RescheduleProposal {
   @Prop({ required: true }) id: string;
+  @Prop({ enum: ['clinic_closure'] }) origin?: 'clinic_closure';
+  @Prop({ enum: ['patient', 'staff'] }) proposedBySide?: 'patient' | 'staff';
+  @Prop() proposedBy?: string;
   @Prop({ required: true }) proposedAt: Date;
   @Prop({ type: ProposalSchedule, required: true }) previousSchedule: ProposalSchedule;
   @Prop({ required: true, maxlength: 500 }) reason: string;

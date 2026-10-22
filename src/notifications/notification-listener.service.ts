@@ -177,19 +177,29 @@ export class NotificationListenerService implements OnModuleInit {
     // let adminMessage: string | null = null;
 
     const latest = transition ?? appointment.history?.[appointment.history.length - 1];
-    const patientRequested = rescheduled && !appointment.rescheduleProposal && appointment.status === AppointmentStatus.PENDING && latest?.actorRole === 'user';
-    if (appointment.rescheduleProposal && appointment.status === AppointmentStatus.PENDING) {
-      patientMessage = 'The clinic proposed a new appointment time. Sign in to accept, request another time, or cancel before the proposed start. An unanswered proposal will automatically cancel.';
-      dentistMessage = `The proposed schedule for ${patientName} is awaiting the patient response.`;
-    } else if (patientRequested) {
+    if (latest?.action === 'Clinic closure requires manual review of ongoing care.') return;
+    const patientRequested = rescheduled && (!appointment.rescheduleProposal || appointment.rescheduleProposal.proposedBySide === 'patient') && appointment.status === AppointmentStatus.PENDING && latest?.actorRole === 'user';
+    if (patientRequested) {
       patientMessage = 'Your requested appointment time is awaiting clinic review.';
       dentistMessage = `${patientName} requested another appointment time. Please review the request.`;
+    } else if (appointment.rescheduleProposal && appointment.status === AppointmentStatus.PENDING) {
+      patientMessage = 'The clinic proposed a new appointment time. Sign in to accept, request another time, or cancel before the proposed start. An unanswered proposal will automatically cancel.';
+      dentistMessage = `The proposed schedule for ${patientName} is awaiting the patient response.`;
     } else if (rescheduled) {
       const date = new Date(appointment.date).toISOString().slice(0, 10);
       const schedule = `${date}, ${appointment.startTime}–${appointment.endTime}`;
       patientMessage = `Your appointment with Dr. ${dentistName} has been rescheduled to ${schedule} and is ${appointment.status}.`;
       dentistMessage = `The appointment for ${patientName} has been rescheduled to ${schedule} and is ${appointment.status}.`;
     } else switch (appointment.status) {
+      case AppointmentStatus.NEEDS_RESCHEDULING:
+        // Initial closure notices are already committed in the closure transaction.
+        if (latest?.action === 'Replacement schedule declined; appointment needs rescheduling.') {
+          const deadline = appointment.closureRescheduling?.expiresAt;
+          const until = deadline ? ` by ${new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(deadline)} (Philippine time)` : '';
+          patientMessage = `The proposed replacement was declined. Choose another schedule${until}, otherwise the appointment will automatically cancel.`;
+          dentistMessage = `${patientName}'s proposed replacement was declined. Arrange another schedule${until}.`;
+        }
+        break;
       case AppointmentStatus.PENDING:
         patientMessage = `Your appointment with Dr. ${dentistName} is pending confirmation.`;
         dentistMessage = `The appointment for ${patientName} is pending confirmation.`;
@@ -204,9 +214,9 @@ export class NotificationListenerService implements OnModuleInit {
         // adminMessage = `Dr. ${dentistName} confirmed the appointment for ${patientName}.`;
         break;
       case AppointmentStatus.CANCELLED:
-        patientMessage = `Your appointment with Dr. ${dentistName} has been cancelled.`;
-        dentistMessage = `The appointment for ${patientName} has been cancelled.`;
-        // adminMessage = `The appointment for ${patientName} with Dr. ${dentistName} has been cancelled.`;
+        patientMessage = `Your appointment with Dr. ${dentistName} has been cancelled.${latest?.reason ? ' Reason: ' + latest.reason : ''}`;
+        dentistMessage = `The appointment for ${patientName} has been cancelled.${latest?.reason ? ' Reason: ' + latest.reason : ''}`;
+        // adminMessage = `The appointment for ${patientName} with Dr. ${dentistName} has been cancelled.${latest?.reason ? ' Reason: ' + latest.reason : ''}`;
         break;
       case AppointmentStatus.COMPLETED:
         patientMessage = `Your appointment with Dr. ${dentistName} is complete. Thank you!`;

@@ -103,4 +103,23 @@ describe('Appointment change notifications', () => {
     ]));
   });
 
+  it('asks clinic staff to review patient-origin closure proposals instead of asking the patient to accept their own time', async () => {
+    Object.assign(appointment, { status: 'pending', scheduleVersion: 1,
+      rescheduleProposal: { id: 'current', origin: 'clinic_closure', proposedBySide: 'patient' },
+      history: [{ action: 'Replacement schedule proposed after clinic closure.', actorRole: 'user', actorId: 'patient-1' }] });
+    onChange({ operationType: 'update', documentKey: { _id: 'appointment-1' }, updateDescription: { updatedFields: { status: 'pending', scheduleVersion: 1, rescheduleProposal: { id: 'current' }, startTime: '11:00' } } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(createMany).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ recipient: 'patient-1', message: expect.stringContaining('awaiting clinic review') }),
+      expect.objectContaining({ recipient: 'dentist-1', message: expect.stringContaining('review') }),
+    ]));
+    expect(JSON.stringify(createMany.mock.calls)).not.toContain('until you agree');
+  });
+  it('does not duplicate closure notices already written in the closure transaction', async () => {
+    Object.assign(appointment, { status: 'needs_rescheduling', history: [{ action: 'Appointment needs rescheduling due to clinic closure.', actorRole: 'admin' }] });
+    onChange({ operationType: 'update', documentKey: { _id: 'appointment-1' }, updateDescription: { updatedFields: { status: 'needs_rescheduling' } } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
 });

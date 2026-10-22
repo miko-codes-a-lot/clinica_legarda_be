@@ -42,7 +42,7 @@ const uri = process.env.TEST_CARE_MONGO_URI;
       if (!user) throw new UnauthorizedException(); req.user = { sub: user._id.toString(), role: user.role, clinics: assignedClinicIds(user) }; return true;
     } };
     const module = await Test.createTestingModule({ controllers: [ClinicClosuresController, AppointmentsController, VisitsController], providers: [
-      { provide: ClinicClosuresService, useValue: new ClinicClosuresService(closures, clinics, appointments, users, notifications, new EventEmitter2()) },
+      { provide: ClinicClosuresService, useValue: new ClinicClosuresService(closures, clinics, appointments, users, notifications, new EventEmitter2(), undefined, visits) },
       { provide: AppointmentsService, useValue: new AppointmentsService(appointments, new AppointmentSchedulingService(appointments, users, clinics, catalog, closures), referrals, users, cases, visits) },
       { provide: VisitsService, useValue: new VisitsService(access, visits, users, clinics, appointments, cases, closures) }, { provide: APP_GUARD, useValue: guard },
     ] }).compile(); app = module.createNestApplication(); app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true })); await app.init();
@@ -61,6 +61,10 @@ const uri = process.env.TEST_CARE_MONGO_URI;
   const patch = (url: string, body: object={}, actor=f.admin) => request(app.getHttpServer()).patch(url).set('x-fixture-user',actor).send(body);
   const get = (url: string, actor=f.admin) => request(app.getHttpServer()).get(url).set('x-fixture-user',actor);
   const closure = (extra={}) => ({ clinic:f.clinic,startDate:day(),endDate:day(),startTime:'09:00',endTime:'12:00',reason:'private closure reason',...extra });
+  const close = async (extra = {}) => {
+    const dto = closure(extra), preview = await post('/clinic-closures/preview', dto).expect(201);
+    return post('/clinic-closures', { ...dto, impactToken: preview.body.impactToken });
+  };
   const booking = () => ({ clinic:f.clinic,patient:f.patient,dentist:f.dentist,date:day(),startTime:'11:00',endTime:'11:30',services:[f.service] });
   it('previews within clinic scope and rejects non-management or outside-clinic actors', async () => {
     const preview = await post('/clinic-closures/preview',closure()).expect(201); expect(preview.body.total).toBe(1);
@@ -68,24 +72,67 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     await post('/clinic-closures',closure(),f.patient).expect(403); await post('/clinic-closures',closure(),f.dentist).expect(403);
     await post('/clinic-closures',closure({endDate:'2026-02-30'})).expect(400);
   });
+  it('requires a current preview, makes no preview writes, and rejects changed impact atomically', async () => {
+    const before = await appointments.findById(f.appointment).lean();
+    const preview = await post('/clinic-closures/preview', closure()).expect(201);
+    expect(preview.body.summary).toMatchObject({ total: 1, immediateCancellations: 0, cancellationRisk: 1 });
+    expect(await appointments.findById(f.appointment).lean()).toEqual(before);
+    await post('/clinic-closures', closure()).expect(400);
+    await appointments.updateOne({ _id: f.appointment }, { status: 'confirmed' });
+    await post('/clinic-closures', { ...closure(), impactToken: preview.body.impactToken }).expect(409);
+    expect(await db.model(ClinicClosure.name).countDocuments()).toBe(0);
+    expect(await db.model(Notification.name).countDocuments()).toBe(0);
+  });
+  it('withdraws invalid proposals and keeps the same deadline across overlapping closures', async () => {
+    await appointments.updateOne({ _id: f.appointment }, { rescheduleProposal: { id: 'old', proposedAt: new Date(), reason: 'Changed hours', previousSchedule: { date: day(), startTime: '09:00', endTime: '09:30' } } });
+    const close = async (extra = {}) => {
+      const dto = closure(extra), preview = await post('/clinic-closures/preview', dto).expect(201);
+      return post('/clinic-closures', { ...dto, impactToken: preview.body.impactToken }).expect(201);
+    };
+    await close();
+    const first = await appointments.findById(f.appointment);
+    expect(first?.status).toBe('needs_rescheduling');
+    expect(first?.rescheduleProposal).toBeUndefined();
+    expect(first?.closureRescheduling?.expiresAt).toBeDefined();
+    await close({ endTime: '13:00', reason: 'Second issue' });
+    const second = await appointments.findById(f.appointment);
+    expect(second?.closureRescheduling?.expiresAt).toEqual(first?.closureRescheduling?.expiresAt);
+    expect(second?.closureRescheduling?.reasons).toEqual(['private closure reason', 'Second issue']);
+    expect(second?.disruption?.closures).toHaveLength(2);
+  });
+  it('protects checked-in care from an automatic closure transition', async () => {
+    await appointments.updateOne({ _id: f.appointment }, { status: 'confirmed' });
+    await db.model(Visit.name).create({ patient: f.patient, dentist: f.dentist, clinic: f.clinic, appointment: f.appointment, date: day(), state: 'in_progress', purpose: 'consultation', checkedInAt: new Date(), createdBy: f.dentist });
+    const preview = await post('/clinic-closures/preview', closure()).expect(201);
+    expect(preview.body.summary).toMatchObject({ total: 1, protectedCare: 1, cancellationRisk: 0 });
+    await post('/clinic-closures', { ...closure(), impactToken: preview.body.impactToken }).expect(201);
+    const current = await appointments.findById(f.appointment);
+    expect(current?.status).toBe('confirmed');
+    expect(current?.closureRescheduling).toBeUndefined();
+    expect(current?.disruption?.message).toContain('ongoing care');
+  });
   it('flags affected appointments and notifies patient and dentist without cancelling', async () => {
-    const result = await post('/clinic-closures',closure()).expect(201);
-    expect(result.body.appointments).toHaveLength(1); expect(result.body.appointments[0]).toMatchObject({status:'pending',disruption:{closures:[result.body.closure._id]}});
+    const result = await close().then(result => { expect(result.status).toBe(201); return result; });
+    expect(result.body.appointments).toHaveLength(1); expect(result.body.appointments[0]).toMatchObject({status:'needs_rescheduling',disruption:{closures:[result.body.closure._id]}});
     expect(await db.model<Notification>(Notification.name).countDocuments({type:'CLINIC_CLOSURE'})).toBe(2);
+    const deadline = (await appointments.findById(f.appointment))?.closureRescheduling?.expiresAt;
+    const expectedDeadline = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(deadline);
+    expect((await db.model<Notification>(Notification.name).findOne({ recipient: f.patient }))?.message).toContain(expectedDeadline);
     const availability = await request(app.getHttpServer()).get(`/clinic-closures/availability?clinic=${f.clinic}`).expect(200);
     expect(JSON.stringify(availability.body)).not.toMatch(/private closure reason|createdBy|affectedAppointments|reopenReason/);
-    await post('/clinic-closures',closure()).expect(409);
+    expect((await close()).status).toBe(409);
   });
   it('keeps historical closure appointment details scoped after an appointment moves clinics', async () => {
-    const c = await post('/clinic-closures',closure()).expect(201);
-    await request(app.getHttpServer()).put(`/appointments/${f.appointment}`).set('x-fixture-user',f.super).send({ ...booking(), clinic:f.outside }).expect(200);
+    const c = await close().then(result => { expect(result.status).toBe(201); return result; });
+    // A retained historical link must remain scoped even if a later migration relocates the record.
+    await appointments.updateOne({ _id: f.appointment }, { clinic: f.outside });
     await get(`/appointments/${f.appointment}`).expect(403);
     const detail = await get(`/clinic-closures/${c.body.closure._id}`).expect(200);
     expect(detail.body.closure.affectedAppointments).toContain(f.appointment);
     expect(detail.body.appointments).toEqual([]);
   });
   it('blocks create, update, approval and overlapping reschedule, then permits a new open interval', async () => {
-    await post('/clinic-closures',closure()).expect(201);
+    await close().then(result => { expect(result.status).toBe(201); return result; });
     await post('/appointments',booking()).expect(409);
     await request(app.getHttpServer()).put(`/appointments/${f.appointment}`).set('x-fixture-user',f.admin).send(booking()).expect(409);
     await patch(`/appointments/${f.appointment}/approve`).expect(409);
@@ -95,7 +142,7 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     await post('/appointments',{...booking(),startTime:'12:00',endTime:'12:30'}).expect(201);
   });
   it('retains unresolved flags on reopening and allows explicit reasoned resolution', async () => {
-    const c = await post('/clinic-closures',closure()).expect(201);
+    const c = await close().then(result => { expect(result.status).toBe(201); return result; });
     await patch(`/appointments/${f.appointment}/clear-disruption`,{reason:'Clinic reopened'}).expect(409);
     await patch(`/clinic-closures/${c.body.closure._id}/reopen`,{reason:'Maintenance completed'}).expect(200);
     expect((await appointments.findById(f.appointment))?.disruption).toBeDefined();
@@ -105,7 +152,7 @@ const uri = process.env.TEST_CARE_MONGO_URI;
   it('preserves dentist availability causes when adding and resolving a closure', async () => {
     const source = f.dentist;
     await appointments.updateOne({ _id: f.appointment }, { disruption: { closures: [], dentistAvailability: [source], flaggedAt: new Date(), message: 'Availability changed' } });
-    const c = await post('/clinic-closures', closure()).expect(201);
+    const c = await close().then(result => { expect(result.status).toBe(201); return result; });
     expect((await appointments.findById(f.appointment))?.disruption?.dentistAvailability?.map(String)).toEqual([source]);
     await patch(`/clinic-closures/${c.body.closure._id}/reopen`, { reason: 'Reopened' }).expect(200);
     await patch(`/appointments/${f.appointment}/clear-disruption`, { reason: 'Closure resolved' }).expect(200);
@@ -114,19 +161,19 @@ const uri = process.env.TEST_CARE_MONGO_URI;
     expect(current?.disruption?.dentistAvailability?.map(String)).toEqual([source]);
   });
   it('keeps overlapping closures blocking until all applicable intervals reopen', async () => {
-    const first = await post('/clinic-closures',closure()).expect(201);
-    await post('/clinic-closures',closure({startTime:'10:00',endTime:'13:00'})).expect(201);
+    const first = await close().then(result => { expect(result.status).toBe(201); return result; });
+    await close({startTime:'10:00',endTime:'13:00'}).then(result => { expect(result.status).toBe(201); return result; });
     await patch(`/clinic-closures/${first.body.closure._id}/reopen`,{reason:'One issue resolved'}).expect(200);
     await patch(`/appointments/${f.appointment}/clear-disruption`,{reason:'Attempt'}).expect(409);
   });
   it('serializes concurrent booking and closure so every accepted overlapping appointment is flagged', async () => {
-    const [closed, booked] = await Promise.all([post('/clinic-closures',closure({endTime:'15:00'})),post('/appointments',{...booking(),startTime:'13:00',endTime:'13:30'})]);
-    expect(closed.status).toBe(201); expect([201,409]).toContain(booked.status);
-    if (booked.status===201) expect((await appointments.findById(booked.body._id))?.disruption?.closures.map(String)).toContain(closed.body.closure._id);
+    const [closed, booked] = await Promise.all([close({endTime:'15:00'}),post('/appointments',{...booking(),startTime:'13:00',endTime:'13:30'})]);
+    expect([201,409]).toContain(closed.status); expect([201,409]).toContain(booked.status);
+    if (closed.status===201 && booked.status===201) expect((await appointments.findById(booked.body._id))?.disruption?.closures.map(String)).toContain(closed.body.closure._id);
   });
   it('blocks scheduled and walk-in check-in for a closed clinic', async () => {
     await appointments.updateOne({_id:f.appointment},{$set:{date:manilaDay(),status:'confirmed'}});
-    await post('/clinic-closures',closure({startDate:manilaDay(),endDate:manilaDay(),startTime:'00:00',endTime:'24:00'})).expect(201);
+    await close({startDate:manilaDay(),endDate:manilaDay(),startTime:'00:00',endTime:'24:00'}).then(result => expect(result.status).toBe(201));
     const intake = {patient:f.patient,clinic:f.clinic,dentist:f.dentist,purpose:'consultation',isWalkIn:true};
     await post('/care/visits',intake).expect(409); await post('/care/visits',{...intake,appointment:f.appointment}).expect(409);
   });

@@ -1,10 +1,19 @@
+import { createHash } from 'crypto';
+import { AppointmentStatus } from '../_shared/enum/appointment-status.enum';
+import { enterClosureRescheduling } from '../appointments/closure-rescheduling.rules';
+import { Visit } from '../care/entities/visit.entity';
+import { buildClosureImpact, RecipientCoverage } from './closure-impact';
+import { ClosurePreview, ClosurePreviewRow } from './dto/closure-preview.dto';
+import { isEmailRecipient } from '../mailer/email-recipient';
+import { isSmsRecipient } from '../sms/sms-recipient';
+import { PATIENT_RECIPIENT_FIELDS, GUARDIAN_RECIPIENT_FIELDS, PatientRecipientSource, patientRecipient } from '../users/patient-recipient';
 import { activePatientScope, requireActivePatient } from '../users/patient-visibility';
 import { AppointmentChangeEmail } from '../appointment-change-emails/entities/appointment-change-email.entity';
 import { findPatientRecipient } from '../users/patient-recipient';
 import { CreateNotificationDto } from '../notifications/dto/create-notification.dto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { ClientSession, Model } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserActor } from '../auth/role-policy';
 import { referenceId } from '../auth/reference-id';
@@ -26,6 +35,7 @@ export class ClinicClosuresService implements OnModuleInit {
     @InjectModel(Notification.name) private readonly notifications: Model<Notification>,
     private readonly events: EventEmitter2,
     @Optional() @InjectModel(AppointmentChangeEmail.name) private readonly outbox?: Model<AppointmentChangeEmail>,
+    @Optional() @InjectModel(Visit.name) private readonly visits?: Model<Visit>,
   ) {}
   async onModuleInit() { await this.closures.init(); }
   private staff(actor: UserActor, clinic?: string) {
@@ -42,48 +52,94 @@ export class ClinicClosuresService implements OnModuleInit {
     return [person.firstName, person.lastName].filter(Boolean).join(' ') || person.username;
   }
   private async affected(dto: ClinicClosureDto, session?: ClientSession) {
-    const candidates = await this.appointments.find({ ...await activePatientScope(this.users, session), clinic: referenceId(dto.clinic), status: { $in: ['pending', 'confirmed'] },
+    const candidates = await this.appointments.find({ ...await activePatientScope(this.users, session), clinic: referenceId(dto.clinic), status: { $in: ['pending', 'confirmed', 'needs_rescheduling'] },
       date: { $gte: new Date(`${dto.startDate}T00:00:00Z`), $lt: new Date(Date.parse(`${dto.endDate}T00:00:00Z`) + 86400000) },
     }).session(session ?? null).exec();
     return candidates.filter(row => closureOverlaps(dto, row.date.toISOString().slice(0,10), row.startTime, row.endTime));
   }
-  private async appointmentRows(ids: unknown[], actor: UserActor, clinic: string) {
-    return this.appointments.find({ ...await activePatientScope(this.users), $and: [{ _id: { $in: ids }, clinic: referenceId(clinic) }, this.scope(actor)] }).select('_id patient dentist clinic date startTime endTime status disruption')
-      .populate([{ path: 'patient', select: '_id firstName lastName username' }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS }, { path: 'clinic', select: CARE_CLINIC_FIELDS }]).sort({ date: 1, startTime: 1 }).lean().exec();
+  private async appointmentRows(ids: unknown[], actor: UserActor, clinic: string, session?: ClientSession): Promise<ClosurePreviewRow[]> {
+    type Person = { _id: Types.ObjectId; firstName?: string; middleName?: string; lastName?: string; username?: string };
+    type Row = Omit<ClosurePreviewRow, '_id' | 'patient' | 'dentist' | 'clinic' | 'date' | 'services' | 'closureRescheduling'> & {
+      _id: Types.ObjectId; patient: Person | null; dentist: Person | null; clinic: { _id: Types.ObjectId; name: string } | null;
+      date: Date; services: ({ _id: Types.ObjectId; name: string } | null)[]; closureRescheduling?: { expiresAt?: Date };
+    };
+    const rows = await this.appointments.find({ ...await activePatientScope(this.users, session), $and: [{ _id: { $in: ids }, clinic: referenceId(clinic) }, this.scope(actor)] })
+      .select('_id patient dentist clinic services date startTime endTime status disruption closureRescheduling rescheduleProposal')
+      .populate([{ path: 'patient', select: '_id firstName middleName lastName username' }, { path: 'dentist', select: CARE_CLINICIAN_FIELDS },
+        { path: 'clinic', select: CARE_CLINIC_FIELDS }, { path: 'services', select: '_id name', options: { retainNullValues: true } }])
+      .session(session ?? null).sort({ date: 1, startTime: 1, _id: 1 }).lean<Row[]>().exec();
+    return rows.map(row => ({ ...row, _id: row._id.toString(), date: row.date.toISOString(),
+      patient: row.patient ? { ...row.patient, _id: row.patient._id.toString() } : null,
+      dentist: row.dentist ? { ...row.dentist, _id: row.dentist._id.toString() } : null,
+      clinic: row.clinic ? { ...row.clinic, _id: row.clinic._id.toString() } : null,
+      services: (row.services ?? []).map(service => service ? { _id: service._id.toString(), name: service.name } : null),
+      closureRescheduling: row.closureRescheduling ? { expiresAt: row.closureRescheduling.expiresAt?.toISOString() } : undefined,
+    }));
   }
-  async preview(actor: UserActor, dto: ClinicClosureDto) {
+  private async impact(actor: UserActor, dto: ClinicClosureDto, rows: Awaited<ReturnType<ClinicClosuresService['affected']>>, session?: ClientSession): Promise<ClosurePreview> {
+    const ids = rows.map(row => row._id);
+    const activeVisits = this.visits ? await this.visits.find({ appointment: { $in: ids }, state: { $in: ['waiting', 'in_progress'] } }).select('_id appointment revision state').session(session ?? null).lean() : [];
+    const protectedIds = new Set(activeVisits.map(visit => String(visit.appointment)));
+    const populated = (await this.appointmentRows(ids, actor, dto.clinic, session)).map(row => ({ ...row, protectedCare: protectedIds.has(row._id) }));
+    const patients = await this.users.find({ _id: { $in: rows.map(row => row.patient) } }).select(PATIENT_RECIPIENT_FIELDS)
+      .populate({ path: 'guardian', select: GUARDIAN_RECIPIENT_FIELDS }).session(session ?? null).lean<PatientRecipientSource[]>();
+    const coverage: RecipientCoverage = {};
+    for (const patient of patients) {
+      const contact = patientRecipient(patient);
+      coverage[String(patient._id)] = { email: isEmailRecipient(contact?.emailAddress), sms: isSmsRecipient(contact?.mobileNumber) };
+    }
+    const generatedAt = new Date();
+    // Include the complete record snapshot, attendance and recipient eligibility; never a browser-owned count.
+    const impactToken = createHash('sha256').update(JSON.stringify({
+      input: [dto.clinic, dto.startDate, dto.endDate, dto.startTime, dto.endTime, dto.reason.trim()],
+      rows: [...rows].sort((a,b) => String(a._id).localeCompare(String(b._id))).map(row => row.toObject()),
+      populated, coverage, activeVisits,
+    })).digest('hex');
+    return { ...buildClosureImpact(populated, coverage, generatedAt), total: rows.length, generatedAt: generatedAt.toISOString(), impactToken };
+  }
+  async preview(actor: UserActor, dto: ClinicClosureDto): Promise<ClosurePreview> {
     this.staff(actor, dto.clinic); assertClosureRange(dto);
     if (!dto.reason.trim()) throw new BadRequestException('Enter a closure reason.');
     if (!await this.clinics.exists({ _id: referenceId(dto.clinic) })) throw new NotFoundException('Clinic not found.');
-    const rows = await this.affected(dto); return { appointments: await this.appointmentRows(rows.map(row => row._id), actor, dto.clinic), total: rows.length };
+    return this.impact(actor, dto, await this.affected(dto));
   }
   async create(actor: UserActor, dto: ClinicClosureDto) {
     this.staff(actor, dto.clinic); assertClosureRange(dto); if (!dto.reason.trim()) throw new BadRequestException('Enter a closure reason.');
+    if (!dto.impactToken) throw new BadRequestException('Preview the closure impact before confirming.');
     try {
       const result = await this.closures.db.transaction(async session => {
         await this.lock(referenceId(dto.clinic), session);
         const rows = await this.affected(dto, session);
+        const impact = await this.impact(actor, dto, rows, session);
+        if (impact.impactToken !== dto.impactToken) throw new ConflictException({ code: 'CLOSURE_PREVIEW_STALE', message: 'Appointments changed. Refresh the closure preview before confirming.' });
+        const protectedIds = new Set(impact.appointments.filter(row => row.protectedCare).map(row => row._id));
         const [closure] = await this.closures.create([{ ...dto, reason: dto.reason.trim(), createdBy: referenceId(actor.sub), createdByName: await this.name(actor, session),
           affectedAppointments: rows.map(row => row._id), activeKey: [referenceId(dto.clinic), dto.startDate, dto.endDate, dto.startTime, dto.endTime].join(':') }], { session });
-        const now = new Date();
+        const now = new Date(Date.now());
         for (const row of rows) {
-          await this.appointments.updateOne({ _id: row._id, status: { $in: ['pending', 'confirmed'] } }, {
-            $set: { disruption: { closures: [...(row.disruption?.closures ?? []), closure._id], dentistAvailability: row.disruption?.dentistAvailability ?? [], flaggedAt: now, message: 'Clinic or dentist availability affects this appointment. Contact the clinic to arrange the next step.' } },
-            $push: { history: { action: 'Appointment affected by clinic closure.', actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } },
+          const protectedCare = protectedIds.has(row.id);
+          const context = enterClosureRescheduling(row, dto.reason, now);
+          const deadline = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(context.expiresAt);
+          await this.appointments.updateOne({ _id: row._id, status: row.status }, {
+            $set: { ...(!protectedCare ? { status: AppointmentStatus.NEEDS_RESCHEDULING, closureRescheduling: context } : {}), disruption: { closures: [...(row.disruption?.closures ?? []), closure._id], dentistAvailability: row.disruption?.dentistAvailability ?? [], flaggedAt: now, message: protectedCare ? `Clinic closed: ${closure.reason}. Staff must review ongoing care; it will not automatically cancel.` : `Clinic closed: ${closure.reason}. Propose a replacement by ${deadline} (Philippine time).` } },
+            ...(!protectedCare ? { $unset: { rescheduleProposal: 1 } } : {}),
+            $push: { history: { action: protectedCare ? 'Clinic closure requires manual review of ongoing care.' : row.rescheduleProposal ? 'Closure withdrew the proposed schedule; appointment needs rescheduling.' : 'Appointment needs rescheduling due to clinic closure.', reason: closure.reason, actorId: actor.sub, actorRole: actor.role, actorName: await this.name(actor, session) } },
           }, { session });
           if (this.outbox) await this.outbox.create([{
             eventKey: `closure:${closure.id}:${row.id}`, appointment: row._id, patient: row.patient, clinic: row.clinic,
-            kind: 'disrupted', scheduleVersion: row.scheduleVersion ?? 0,
+            kind: 'disrupted', protectedCare, ...(!protectedCare ? { proposalDeadline: context.expiresAt } : {}), scheduleVersion: row.scheduleVersion ?? 0,
             schedule: { date: row.date.toISOString().slice(0, 10), startTime: row.startTime, endTime: row.endTime },
             reason: closure.reason,
           }], { session });
         }
         const notices: CreateNotificationDto[] = [];
         for (const row of rows) {
+          const protectedCare = protectedIds.has(row.id);
+          const deadline = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(enterClosureRescheduling(row, dto.reason, now).expiresAt);
           const recipient = await findPatientRecipient(this.users, row.patient, session);
           notices.push(
-          ...(recipient ? [{ recipient: recipient.id, appointment: referenceId(row._id), type: NotificationType.CLINIC_CLOSURE, message: `${recipient.patientName ? recipient.patientName + ': ' : ''}A clinic closure affects your appointment. Contact the clinic to review the schedule.`, link: '/app/my-appointment', triggeredBy: referenceId(actor.sub) }] : []),
-          { recipient: referenceId(row.dentist), appointment: referenceId(row._id), type: NotificationType.CLINIC_CLOSURE, message: 'A clinic closure affects an appointment in your schedule. Review it with clinic staff.', link: `/dentist/appointment/details/${row.id}`, triggeredBy: referenceId(actor.sub) },
+          ...(recipient ? [{ recipient: recipient.id, appointment: referenceId(row._id), type: NotificationType.CLINIC_CLOSURE, message: protectedCare ? `Clinic closed: ${closure.reason}. Staff will review ongoing care with you; it will not automatically cancel.` : `${recipient.patientName ? recipient.patientName + ': ' : ''}Your appointment needs rescheduling due to clinic closure: ${closure.reason}. Propose a replacement by ${deadline} (Philippine time) to avoid automatic cancellation.`, link: '/app/my-appointment', triggeredBy: referenceId(actor.sub) }] : []),
+          { recipient: referenceId(row.dentist), appointment: referenceId(row._id), type: NotificationType.CLINIC_CLOSURE, message: protectedCare ? `Clinic closure requires manual review of ongoing care: ${closure.reason}.` : `An appointment needs rescheduling due to clinic closure: ${closure.reason}. Propose a replacement by ${deadline} (Philippine time).`, link: `/dentist/appointment/details/${row.id}`, triggeredBy: referenceId(actor.sub) },
           );
         }
         const notifications = notices.length ? await this.notifications.insertMany(notices, { session }) : [];
